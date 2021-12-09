@@ -1,0 +1,1311 @@
+<!DOCTYPE html><html lang="zh-Hans">
+  <head><meta charset="utf-8">
+<meta http-equiv="X-UA-Compatible" content="IE=edge">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"><title>深入Go：sync.Map - Wenxing Lai</title>
+
+<meta name="description" content="我们在使用Go的项目中需要有并发读写的map时，我们了解到Go提供sync.Map这一数据结构；通过对其简单了解，发现它正好适合我们需要的场景。随着了解的深入，我们又有了疑惑：为什么不像Java SE 8之前的ConcurrentHashMap一样，使用分段锁？为什么在内部需要一个哨兵指针expunged？这两个...">
+<link rel="canonical" href="http://localhost:4000/2020/11/27/%E6%B7%B1%E5%85%A5Go-sync.Map.html"><link rel="alternate" type="application/rss+xml" title="Wenxing Lai" href="/feed.xml"><!-- start favicons snippet, use https://realfavicongenerator.net/ --><link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png"><link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png"><link rel="manifest" href="/assets/site.webmanifest"><link rel="mask-icon" href="/assets/safari-pinned-tab.svg" color="#fc4d50"><link rel="shortcut icon" href="/assets/favicon.ico">
+
+<meta name="msapplication-TileColor" content="#ffc40d"><meta name="msapplication-config" content="/assets/browserconfig.xml">
+
+<meta name="theme-color" content="#ffffff">
+<!-- end favicons snippet --><link rel="stylesheet" href="/assets/css/main.css"><link rel="stylesheet" href="https://cdn.bootcdn.net/ajax/libs/font-awesome/5.15.1/css/all.css" ><!-- start custom head snippets -->
+
+<!-- end custom head snippets -->
+<script>(function() {
+  window.isArray = function(val) {
+    return Object.prototype.toString.call(val) === '[object Array]';
+  };
+  window.isString = function(val) {
+    return typeof val === 'string';
+  };
+
+  window.hasEvent = function(event) {
+    return 'on'.concat(event) in window.document;
+  };
+
+  window.isOverallScroller = function(node) {
+    return node === document.documentElement || node === document.body || node === window;
+  };
+
+  window.isFormElement = function(node) {
+    var tagName = node.tagName;
+    return tagName === 'INPUT' || tagName === 'SELECT' || tagName === 'TEXTAREA';
+  };
+
+  window.pageLoad = (function () {
+    var loaded = false, cbs = [];
+    window.addEventListener('load', function () {
+      var i;
+      loaded = true;
+      if (cbs.length > 0) {
+        for (i = 0; i < cbs.length; i++) {
+          cbs[i]();
+        }
+      }
+    });
+    return {
+      then: function(cb) {
+        cb && (loaded ? cb() : (cbs.push(cb)));
+      }
+    };
+  })();
+})();
+(function() {
+  window.throttle = function(func, wait) {
+    var args, result, thisArg, timeoutId, lastCalled = 0;
+
+    function trailingCall() {
+      lastCalled = new Date;
+      timeoutId = null;
+      result = func.apply(thisArg, args);
+    }
+    return function() {
+      var now = new Date,
+        remaining = wait - (now - lastCalled);
+
+      args = arguments;
+      thisArg = this;
+
+      if (remaining <= 0) {
+        clearTimeout(timeoutId);
+        timeoutId = null;
+        lastCalled = now;
+        result = func.apply(thisArg, args);
+      } else if (!timeoutId) {
+        timeoutId = setTimeout(trailingCall, remaining);
+      }
+      return result;
+    };
+  };
+})();
+(function() {
+  var Set = (function() {
+    var add = function(item) {
+      var i, data = this._data;
+      for (i = 0; i < data.length; i++) {
+        if (data[i] === item) {
+          return;
+        }
+      }
+      this.size ++;
+      data.push(item);
+      return data;
+    };
+
+    var Set = function(data) {
+      this.size = 0;
+      this._data = [];
+      var i;
+      if (data.length > 0) {
+        for (i = 0; i < data.length; i++) {
+          add.call(this, data[i]);
+        }
+      }
+    };
+    Set.prototype.add = add;
+    Set.prototype.get = function(index) { return this._data[index]; };
+    Set.prototype.has = function(item) {
+      var i, data = this._data;
+      for (i = 0; i < data.length; i++) {
+        if (this.get(i) === item) {
+          return true;
+        }
+      }
+      return false;
+    };
+    Set.prototype.is = function(map) {
+      if (map._data.length !== this._data.length) { return false; }
+      var i, j, flag, tData = this._data, mData = map._data;
+      for (i = 0; i < tData.length; i++) {
+        for (flag = false, j = 0; j < mData.length; j++) {
+          if (tData[i] === mData[j]) {
+            flag = true;
+            break;
+          }
+        }
+        if (!flag) { return false; }
+      }
+      return true;
+    };
+    Set.prototype.values = function() {
+      return this._data;
+    };
+    return Set;
+  })();
+
+  window.Lazyload = (function(doc) {
+    var queue = {js: [], css: []}, sources = {js: {}, css: {}}, context = this;
+    var createNode = function(name, attrs) {
+      var node = doc.createElement(name), attr;
+      for (attr in attrs) {
+        if (attrs.hasOwnProperty(attr)) {
+          node.setAttribute(attr, attrs[attr]);
+        }
+      }
+      return node;
+    };
+    var end = function(type, url) {
+      var s, q, qi, cbs, i, j, cur, val, flag;
+      if (type === 'js' || type ==='css') {
+        s = sources[type], q = queue[type];
+        s[url] = true;
+        for (i = 0; i < q.length; i++) {
+          cur = q[i];
+          if (cur.urls.has(url)) {
+            qi = cur, val = qi.urls.values();
+            qi && (cbs = qi.callbacks);
+            for (flag = true, j = 0; j < val.length; j++) {
+              cur = val[j];
+              if (!s[cur]) {
+                flag = false;
+              }
+            }
+            if (flag && cbs && cbs.length > 0) {
+              for (j = 0; j < cbs.length; j++) {
+                cbs[j].call(context);
+              }
+              qi.load = true;
+            }
+          }
+        }
+      }
+    };
+    var load = function(type, urls, callback) {
+      var s, q, qi, node, i, cur,
+        _urls = typeof urls === 'string' ? new Set([urls]) : new Set(urls), val, url;
+      if (type === 'js' || type ==='css') {
+        s = sources[type], q = queue[type];
+        for (i = 0; i < q.length; i++) {
+          cur = q[i];
+          if (_urls.is(cur.urls)) {
+            qi = cur;
+            break;
+          }
+        }
+        val = _urls.values();
+        if (qi) {
+          callback && (qi.load || qi.callbacks.push(callback));
+          callback && (qi.load && callback());
+        } else {
+          q.push({
+            urls: _urls,
+            callbacks: callback ? [callback] : [],
+            load: false
+          });
+          for (i = 0; i < val.length; i++) {
+            node = null, url = val[i];
+            if (s[url] === undefined) {
+              (type === 'js' ) && (node = createNode('script', { src: url }));
+              (type === 'css') && (node = createNode('link', { rel: 'stylesheet', href: url }));
+              if (node) {
+                node.onload = (function(type, url) {
+                  return function() {
+                    end(type, url);
+                  };
+                })(type, url);
+                (doc.head || doc.body).appendChild(node);
+                s[url] = false;
+              }
+            }
+          }
+        }
+      }
+    };
+    return {
+      js: function(url, callback) {
+        load('js', url, callback);
+      },
+      css: function(url, callback) {
+        load('css', url, callback);
+      }
+    };
+  })(this.document);
+})();
+</script><script>
+  (function() {
+    var TEXT_VARIABLES = {
+      version: '2.2.6',
+      sources: {
+        font_awesome: 'https://cdn.bootcdn.net/ajax/libs/font-awesome/5.15.1/css/all.css',
+        jquery: 'https://cdn.bootcss.com/jquery/3.1.1/jquery.min.js',
+        leancloud_js_sdk: '//cdn.jsdelivr.net/npm/leancloud-storage@3.13.2/dist/av-min.js',
+        chart: 'https://cdn.bootcss.com/Chart.js/2.7.2/Chart.bundle.min.js',
+        gitalk: {
+          js: 'https://cdn.bootcss.com/gitalk/1.2.2/gitalk.min.js',
+          css: 'https://cdn.bootcss.com/gitalk/1.2.2/gitalk.min.css'
+        },
+        valine: 'https://unpkg.com/valine/dist/Valine.min.js',
+        mathjax: 'https://cdn.bootcss.com/mathjax/2.7.4/MathJax.js?config=TeX-MML-AM_CHTML',
+        mermaid: 'https://cdn.bootcss.com/mermaid/8.0.0-rc.8/mermaid.min.js'
+      },
+      site: {
+        toc: {
+          selectors: 'h1,h2,h3'
+        }
+      },
+      paths: {
+        search_js: '/assets/search.js'
+      }
+    };
+    window.TEXT_VARIABLES = TEXT_VARIABLES;
+  })();
+</script>
+</head>
+  <body>
+    <div class="root" data-is-touch="false">
+      <div class="layout--page js-page-root"><div class="page__main js-page-main page__viewport has-aside cell cell--auto">
+
+      <div class="page__main-inner"><div class="page__header d-print-none"><header class="header"><div class="main">
+      <div class="header__title">
+        <div class="header__brand"><?xml version="1.0" encoding="iso-8859-1"?>
+<!-- Generator: Adobe Illustrator 18.1.1, SVG Export Plug-In . SVG Version: 6.00 Build 0)  -->
+<svg version="1.1" id="Capa_1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" x="0px" y="0px"
+	 viewBox="0 0 31.999 31.999" style="enable-background:new 0 0 31.999 31.999;" xml:space="preserve">
+<g>
+	<path id="star" style="fill:#010002;" d="M31.881,12.056c-0.277-0.799-0.988-1.384-1.844-1.511l-8.326-1.238l-3.619-7.514
+		C17.711,1.004,16.896,0.499,16,0.499c-0.896,0-1.711,0.505-2.092,1.294l-3.619,7.514l-8.327,1.238
+		c-0.855,0.127-1.566,0.712-1.842,1.511c-0.275,0.801-0.067,1.683,0.537,2.285l6.102,6.092l-1.415,8.451
+		c-0.144,0.851,0.225,1.705,0.948,2.203c0.397,0.273,0.864,0.412,1.331,0.412c0.384,0,0.769-0.094,1.118-0.281L16,27.31l7.26,3.908
+		c0.349,0.187,0.734,0.281,1.117,0.281c0.467,0,0.934-0.139,1.332-0.412c0.723-0.498,1.09-1.352,0.947-2.203l-1.416-8.451
+		l6.104-6.092C31.947,13.738,32.154,12.856,31.881,12.056z M23.588,18.862c-0.512,0.51-0.744,1.229-0.627,1.934l1.416,8.451
+		l-7.26-3.906c-0.348-0.188-0.732-0.281-1.118-0.281c-0.384,0-0.769,0.094-1.117,0.281l-7.26,3.906l1.416-8.451
+		c0.118-0.705-0.114-1.424-0.626-1.934L2.31,12.77l8.326-1.24c0.761-0.113,1.416-0.589,1.743-1.268L16,2.75l3.62,7.513
+		c0.328,0.679,0.982,1.154,1.742,1.268l8.328,1.24L23.588,18.862z"/>
+</g>
+<g>
+</g>
+<g>
+</g>
+<g>
+</g>
+<g>
+</g>
+<g>
+</g>
+<g>
+</g>
+<g>
+</g>
+<g>
+</g>
+<g>
+</g>
+<g>
+</g>
+<g>
+</g>
+<g>
+</g>
+<g>
+</g>
+<g>
+</g>
+<g>
+</g>
+</svg>
+<a title="Wenxing’s blog is right here.
+" href="/">Wenxing Lai</a></div><button class="button button--secondary button--circle search-button js-search-toggle"><i class="fas fa-search"></i></button></div><nav class="navigation">
+        <ul><li class="navigation__item"><a href="/archive.html">归档</a></li><li class="navigation__item"><a href="/about.html">关于</a></li><li><button class="button button--secondary button--circle search-button js-search-toggle"><i class="fas fa-search"></i></button></li></ul>
+      </nav></div>
+  </header>
+</div><div class="page__content"><div class ="main"><div class="grid grid--reverse">
+
+              <div class="col-aside d-print-none js-col-aside"><aside class="page__aside js-page-aside"><div class="toc-aside js-toc-root"></div>
+</aside></div>
+
+              <div class="col-main cell cell--auto"><!-- start custom main top snippet -->
+
+<!-- end custom main top snippet -->
+<article itemscope itemtype="http://schema.org/Article"><div class="article__header"><header><h1>深入Go：sync.Map</h1></header><span class="split-space">&nbsp;</span>
+          <a class="edit-on-github"
+            title="在 Github 上修改"
+            href="https://github.com/WenxingLai/wenxinglai.github.io/tree/master/_posts/2020-11-27-深入Go：sync.Map.md">
+            <i class="far fa-edit"></i></a></div><meta itemprop="headline" content="深入Go：sync.Map"><div class="article__info clearfix"><ul class="left-col menu"><li>
+              <a class="button button--secondary button--pill button--sm"
+                href="/archive.html?tag=Go">Go</a>
+            </li></ul><ul class="right-col menu"><li><i class="far fa-calendar-alt"></i> <span>2020年 11月27日</span>
+            </li><li><i class="far fa-eye"></i> <span class="js-pageview" data-page-key="">0</span> 阅读</li></ul></div><meta itemprop="author" content="Wenxing Lai"/><meta itemprop="datePublished" content="2020-11-27T00:00:00+00:00">
+    <meta itemprop="keywords" content="Go"><div class="js-article-content"><div class="layout--article"><!-- start custom article top snippet -->
+
+<!-- end custom article top snippet -->
+<div class="article__content" itemprop="articleBody"><p>我们在使用Go的项目中需要有并发读写的map时，我们了解到Go提供<code class="language-plaintext highlighter-rouge">sync.Map</code>这一数据结构；通过对其简单了解，发现它正好适合我们需要的场景。随着了解的深入，我们又有了疑惑：为什么不像Java SE 8之前的ConcurrentHashMap一样，使用分段锁？为什么在内部需要一个哨兵指针<code class="language-plaintext highlighter-rouge">expunged</code>？这两个问题我们简单Google后都没有找到解析和讨论，因此我们决定深入<code class="language-plaintext highlighter-rouge">sync.Map</code>的源代码，尝试回答这两个问题。</p>
+
+<h4 id="太长不看版">太长不看版</h4>
+
+<h5 id="预备知识">预备知识</h5>
+
+<ul>
+  <li>map的读写删除都不是原子操作，因此需要控制并发访问，而Go的原生map不支持并发读写；</li>
+  <li>Go在1.9的版本中新增了<code class="language-plaintext highlighter-rouge">sync.Map</code>的数据结构，通过空间换时间的方式降低了加锁的频率：
+    <ul>
+      <li>使用<code class="language-plaintext highlighter-rouge">read</code>和<code class="language-plaintext highlighter-rouge">dirty</code>两个map来保存键值，map的值为指向<code class="language-plaintext highlighter-rouge">entry</code>的指针，<code class="language-plaintext highlighter-rouge">entry</code>存储指向真实值的指针</li>
+      <li>当需要向<code class="language-plaintext highlighter-rouge">dirty</code>中插入新值时，如果<code class="language-plaintext highlighter-rouge">dirty</code>为空则将除<code class="language-plaintext highlighter-rouge">entry.p == nil</code>外的<code class="language-plaintext highlighter-rouge">read</code>的键值浅拷贝到<code class="language-plaintext highlighter-rouge">dirty</code>（<code class="language-plaintext highlighter-rouge">nil</code>的处理我们后面会详细讨论，这也是<code class="language-plaintext highlighter-rouge">sync.Map</code>的highlight）</li>
+      <li><code class="language-plaintext highlighter-rouge">read</code>中包含的键可不加锁地读和删（不是删除对应值，而是将<code class="language-plaintext highlighter-rouge">entry.p = nil</code>以表示对应值被删除了）</li>
+      <li>除了一种特殊情况外，更新<code class="language-plaintext highlighter-rouge">read</code>中已经存在的键的值也无需加锁，该特殊情况在后文会详细讲到</li>
+      <li>对<code class="language-plaintext highlighter-rouge">dirty</code>的读写删除都需要加锁，当<code class="language-plaintext highlighter-rouge">dirty</code>中包含<code class="language-plaintext highlighter-rouge">read</code>中没有的键值时（<code class="language-plaintext highlighter-rouge">read.amended = true</code>），会
+        <ul>
+          <li>读写<code class="language-plaintext highlighter-rouge">read</code>中不存在的键：加锁并在<code class="language-plaintext highlighter-rouge">dirty</code>中完成对应操作</li>
+          <li>删除<code class="language-plaintext highlighter-rouge">read</code>中不存在的键：直接<code class="language-plaintext highlighter-rouge">delete(dirty, key)</code></li>
+        </ul>
+      </li>
+      <li>当对<code class="language-plaintext highlighter-rouge">dirty</code>中的访问数量大于其长度时，直接将<code class="language-plaintext highlighter-rouge">read</code>中map的指针替换为<code class="language-plaintext highlighter-rouge">dirty</code>，并将<code class="language-plaintext highlighter-rouge">dirty</code>置为<code class="language-plaintext highlighter-rouge">nil</code>、<code class="language-plaintext highlighter-rouge">read.amended</code>置为<code class="language-plaintext highlighter-rouge">false</code>。</li>
+    </ul>
+  </li>
+</ul>
+
+<h5 id="两个问题的回答">两个问题的回答</h5>
+
+<ul>
+  <li>为什么不像Java SE 8之前的ConcurrentHashMap一样，使用分段锁？
+    <ul>
+      <li>我们猜测是因为为了避免重写一套map的逻辑，<code class="language-plaintext highlighter-rouge">sync.Map</code>可以直接使用<code class="language-plaintext highlighter-rouge">map</code>作为内部的实现而无需重写分配到哪一段的hashing逻辑；</li>
+      <li>也因为<code class="language-plaintext highlighter-rouge">sync.Map</code>的适用场景和ConcurrentHashMap不同。<code class="language-plaintext highlighter-rouge">sync.Map</code>适合读写删除的键值范围比较固定的情况（即基本都能在<code class="language-plaintext highlighter-rouge">read</code>中命中而无需加锁查询<code class="language-plaintext highlighter-rouge">read</code>），不适合需要频繁增加、访问新值的情况（即频繁读写<code class="language-plaintext highlighter-rouge">dirty</code>）。后者建议使用分段锁的map。</li>
+    </ul>
+  </li>
+  <li>哨兵指针<code class="language-plaintext highlighter-rouge">expunged</code>有什么作用？
+    <ul>
+      <li>为了保证<code class="language-plaintext highlighter-rouge">dirty</code>和<code class="language-plaintext highlighter-rouge">read</code>键值的同步，以保证在将<code class="language-plaintext highlighter-rouge">read</code>替换为<code class="language-plaintext highlighter-rouge">dirty</code>时能一步完成。</li>
+    </ul>
+  </li>
+</ul>
+
+<h4 id="为什么需要可并发访问的map">为什么需要可并发访问的Map</h4>
+
+<p>Map是Go语言中广泛使用的数据结构，但它并不是可并发读写的。尝试以下代码，会得到<code class="language-plaintext highlighter-rouge">fatal error: concurrent map read and map write</code>。</p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">func</span> <span class="n">main</span><span class="p">()</span> <span class="p">{</span>
+    <span class="n">m</span> <span class="o">:=</span> <span class="nb">make</span><span class="p">(</span><span class="k">map</span><span class="p">[</span><span class="kt">int</span><span class="p">]</span><span class="kt">int</span><span class="p">)</span>
+
+    <span class="k">go</span> <span class="k">func</span><span class="p">()</span> <span class="p">{</span>
+        <span class="k">for</span> <span class="n">i</span> <span class="o">:=</span> <span class="m">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="m">100000</span><span class="p">;</span> <span class="n">i</span> <span class="o">+=</span> <span class="m">1</span> <span class="p">{</span>
+            <span class="n">m</span><span class="p">[</span><span class="n">i</span><span class="p">]</span> <span class="o">=</span> <span class="n">i</span>
+        <span class="p">}</span>
+    <span class="p">}()</span>
+    <span class="k">for</span> <span class="n">i</span> <span class="o">:=</span> <span class="m">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&lt;</span> <span class="m">100000</span><span class="p">;</span> <span class="n">i</span> <span class="o">+=</span> <span class="m">1</span> <span class="p">{</span>
+        <span class="n">_</span> <span class="o">=</span> <span class="n">m</span><span class="p">[</span><span class="n">i</span><span class="p">]</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>这是因为在Map的源码中，有</p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">func</span> <span class="n">mapaccess1</span><span class="p">(</span><span class="n">t</span> <span class="o">*</span><span class="n">maptype</span><span class="p">,</span> <span class="n">h</span> <span class="o">*</span><span class="n">hmap</span><span class="p">,</span> <span class="n">key</span> <span class="n">unsafe</span><span class="o">.</span><span class="n">Pointer</span><span class="p">)</span> <span class="n">unsafe</span><span class="o">.</span><span class="n">Pointer</span> <span class="p">{</span>
+    <span class="o">...</span>
+  <span class="c">// 如果在读map的时候检测到hashWriting flag为1（即，有协程在写该map）则panic</span>
+    <span class="k">if</span> <span class="n">h</span><span class="o">.</span><span class="n">flags</span><span class="o">&amp;</span><span class="n">hashWriting</span> <span class="o">!=</span> <span class="m">0</span> <span class="p">{</span>
+        <span class="n">throw</span><span class="p">(</span><span class="s">"concurrent map read and map write"</span><span class="p">)</span>
+    <span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>本质上是因为，map的读写都不是“原子操作”，试想：当你尝试读（copy）一个struct的时候，突然另一个协程将该struct删除并触发垃圾回收、或者另一个协程更新了该struct——我们就变成了读一个非法的struct，从而导致问题。</p>
+
+<p>在实践中，往往我们又需要一个可并发读写的Map。那么，如何解决？</p>
+
+<h4 id="并发读写的map">并发读写的Map</h4>
+
+<p>我们不假思索就可以想到，可以通过加锁解决——每次读写，我们都给map加上mutex——但加锁意味着性能损失，因此我们要尝试减少加锁的次数。</p>
+
+<p>首先我们可以考虑使用<code class="language-plaintext highlighter-rouge">RWMutex</code>——该mutex可被任意多的读协程获取，或被一个写协程获取——使用<code class="language-plaintext highlighter-rouge">RWMutex</code>直接降低了多读少写的Map的性能损失。</p>
+
+<p>当然，我们也可以借鉴Java SE 8之前经典的<code class="language-plaintext highlighter-rouge">ConcurrentHashMap</code>的实现方式——将Map进行分段，每个分段进行加<code class="language-plaintext highlighter-rouge">RWMutex</code>的操作。这一思路在orcaman实现的<a href="https://github.com/orcaman/concurrent-map">concurrent-map</a>中被使用。</p>
+
+<p>Go的思路和Java的<code class="language-plaintext highlighter-rouge">ConcurrentHashMap</code>不同，因为<code class="language-plaintext highlighter-rouge">ConcurrentHashMap</code>总的来说是对map的重写，因为分段加锁需要新的hashing逻辑（因此orcaman实现的concurrent-map，就是为了避免实现新的hashing逻辑，所以只支持键的类型为string）；Go的map本来已经实现得非常优秀，那么如何利用已经存在的map，构建出并发读写安全的数据结构呢？</p>
+
+<h4 id="introducing-syncmap">Introducing sync.Map</h4>
+
+<p>Go在1.9的版本中引入了<code class="language-plaintext highlighter-rouge">sync.Map</code>这一支持并发读写的数据结构，其利用空间换时间的思路，使用成员<code class="language-plaintext highlighter-rouge">read</code>、<code class="language-plaintext highlighter-rouge">dirty</code>来优化固定场景下读写的性能——只对<code class="language-plaintext highlighter-rouge">dirty</code>的访问加锁，即当用户读写<code class="language-plaintext highlighter-rouge">read</code>中的entry时，sync.Map并不加锁，当用户读写<code class="language-plaintext highlighter-rouge">dirty</code>中存在的entry时，sync.Map才对该操作加锁。我们接下来通过读<code class="language-plaintext highlighter-rouge">sync.Map</code>的<a href="https://github.com/golang/go/blob/master/src/sync/map.go">源代码</a>来了解：</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">sync.Map</code>有着怎样的结构</li>
+  <li>如何读</li>
+  <li>如何写</li>
+  <li>如何删</li>
+  <li>为何使用<code class="language-plaintext highlighter-rouge">expunged</code>值</li>
+  <li><code class="language-plaintext highlighter-rouge">sync.Map</code>优化了哪些场景下的性能</li>
+</ul>
+
+<h5 id="syncmap的结构">sync.Map的结构</h5>
+
+<p><code class="language-plaintext highlighter-rouge">sync.Map</code>使用<code class="language-plaintext highlighter-rouge">map</code>作为底层的实现，因此其内部继承了map良好的读写性能；不过其依赖的底层<code class="language-plaintext highlighter-rouge">map</code>存储的“值”并不是存的用户提供的值，而是指向<code class="language-plaintext highlighter-rouge">entry</code>的指针类型，用以判断对应键值的状态，关于<code class="language-plaintext highlighter-rouge">entry</code>的代码如下：</p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c">// expunged是初始化时随机生成的哨兵值，</span>
+<span class="c">// 标志该值已经从map的read中删除且不存在于dirty中。</span>
+<span class="k">var</span> <span class="n">expunged</span> <span class="o">=</span> <span class="n">unsafe</span><span class="o">.</span><span class="n">Pointer</span><span class="p">(</span><span class="nb">new</span><span class="p">(</span><span class="k">interface</span><span class="p">{}))</span>
+
+<span class="k">type</span> <span class="n">entry</span> <span class="k">struct</span> <span class="p">{</span>
+    <span class="c">// p为指针，可指向：</span>
+  <span class="c">// -&gt; nil，表示对应键值已从map的read中删除，但存在于dirty中</span>
+  <span class="c">// -&gt; expunged，表示对应键值已从map中删除，但不存在于dirty中</span>
+  <span class="c">// -&gt; 其他地址，指向真实数据</span>
+    <span class="n">p</span> <span class="n">unsafe</span><span class="o">.</span><span class="n">Pointer</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>然后看<code class="language-plaintext highlighter-rouge">sync.Map</code>中<code class="language-plaintext highlighter-rouge">read</code>成员<code class="language-plaintext highlighter-rouge">readOnly</code>结构体：</p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">type</span> <span class="n">readOnly</span> <span class="k">struct</span> <span class="p">{</span>
+    <span class="n">m</span>       <span class="k">map</span><span class="p">[</span><span class="k">interface</span><span class="p">{}]</span><span class="o">*</span><span class="n">entry</span>
+    <span class="n">amended</span> <span class="kt">bool</span> <span class="c">// 如果dirty包含read中不包含的entry指针时为true。</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>下面我们就可以来看<code class="language-plaintext highlighter-rouge">sync.Map</code>本身的代码了。</p>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">type</span> <span class="n">Map</span> <span class="k">struct</span> <span class="p">{</span>
+   <span class="n">mu</span> <span class="n">Mutex</span>
+  
+   <span class="c">// read包含并发安全的map部分，访问它（的entries）永远不用加锁</span>
+   <span class="c">// 当entry需要从read删除时，并不直接删除该entry的指针e，</span>
+   <span class="c">// 而是将e.p置为nil。</span>
+   <span class="c">// 除了进行写操作且对应键的entry的e.p == expunged时，</span>
+   <span class="c">// （此时也不是对read加锁，而是对dirty加锁）</span>
+   <span class="c">// 对read中的键值进行读、写和删除都不用加锁。</span>
+   <span class="n">read</span> <span class="n">atomic</span><span class="o">.</span><span class="n">Value</span> <span class="c">// readOnly</span>
+
+   <span class="c">// dirty包括map中需要加锁读写的部分。</span>
+   <span class="c">// 为保证从dirty至read的更新耗时足够小，</span>
+   <span class="c">// 因此需要把read中从expunged状态恢复的entry加入dirty</span>
+   <span class="c">// （此时read仍未被加锁，是写到dirty从而对dirty加锁）。</span>
+   <span class="c">// 当向dirty写的时候，如果dirty为nil，</span>
+   <span class="c">// 则需要浅拷贝read（unplunged entries除外，详情见Store代码）</span>
+   <span class="n">dirty</span> <span class="k">map</span><span class="p">[</span><span class="k">interface</span><span class="p">{}]</span><span class="o">*</span><span class="n">entry</span>
+
+   <span class="c">// misses是计算read更新后访问map时获取mu的计数器</span>
+   <span class="c">// 当misses数量超过dirty长度时，dirty会跃升为新的read并将dirty置为nil</span>
+   <span class="n">misses</span> <span class="kt">int</span>
+<span class="p">}</span>
+</code></pre></div></div>
+<h5 id="load操作">Load操作</h5>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">func</span> <span class="p">(</span><span class="n">m</span> <span class="o">*</span><span class="n">Map</span><span class="p">)</span> <span class="n">Load</span><span class="p">(</span><span class="n">key</span> <span class="k">interface</span><span class="p">{})</span> <span class="p">(</span><span class="n">value</span> <span class="k">interface</span><span class="p">{},</span> <span class="n">ok</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">read</span><span class="p">,</span> <span class="n">_</span> <span class="o">:=</span> <span class="n">m</span><span class="o">.</span><span class="n">read</span><span class="o">.</span><span class="n">Load</span><span class="p">()</span><span class="o">.</span><span class="p">(</span><span class="n">readOnly</span><span class="p">)</span>
+    <span class="n">e</span><span class="p">,</span> <span class="n">ok</span> <span class="o">:=</span> <span class="n">read</span><span class="o">.</span><span class="n">m</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+    <span class="k">if</span> <span class="o">!</span><span class="n">ok</span> <span class="o">&amp;&amp;</span> <span class="n">read</span><span class="o">.</span><span class="n">amended</span> <span class="p">{</span> <span class="c">// 如果找不到，且dirty含有新键值</span>
+        <span class="n">m</span><span class="o">.</span><span class="n">mu</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
+        <span class="c">// 双重检查，避免另一协程已经将read替换为dirty</span>
+        <span class="n">read</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">read</span><span class="o">.</span><span class="n">Load</span><span class="p">()</span><span class="o">.</span><span class="p">(</span><span class="n">readOnly</span><span class="p">)</span>
+        <span class="n">e</span><span class="p">,</span> <span class="n">ok</span> <span class="o">=</span> <span class="n">read</span><span class="o">.</span><span class="n">m</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+        <span class="k">if</span> <span class="o">!</span><span class="n">ok</span> <span class="o">&amp;&amp;</span> <span class="n">read</span><span class="o">.</span><span class="n">amended</span> <span class="p">{</span>
+      <span class="c">// 从dirty中获取</span>
+            <span class="n">e</span><span class="p">,</span> <span class="n">ok</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">dirty</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+      <span class="c">// 增加misses计数，如果超过len(dirty)则将read替换为dirty并将dirty置为nil</span>
+            <span class="n">m</span><span class="o">.</span><span class="n">missLocked</span><span class="p">()</span>
+        <span class="p">}</span>
+        <span class="n">m</span><span class="o">.</span><span class="n">mu</span><span class="o">.</span><span class="n">Unlock</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="o">!</span><span class="n">ok</span> <span class="p">{</span> <span class="c">// 未找到对应键</span>
+        <span class="k">return</span> <span class="no">nil</span><span class="p">,</span> <span class="no">false</span>
+  <span class="p">}</span>
+    <span class="k">return</span> <span class="n">e</span><span class="o">.</span><span class="n">load</span><span class="p">()</span> <span class="c">// 返回真实值</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>因此我们可以知道，以下情况<code class="language-plaintext highlighter-rouge">Load</code>不需要加锁：</p>
+
+<ul>
+  <li>当<code class="language-plaintext highlighter-rouge">read.amended == false</code>的时候，此时<code class="language-plaintext highlighter-rouge">dirty == nil</code></li>
+  <li><code class="language-plaintext highlighter-rouge">key</code>存在于<code class="language-plaintext highlighter-rouge">read.m</code>中，无论对应entry的指针为<code class="language-plaintext highlighter-rouge">nil</code>、<code class="language-plaintext highlighter-rouge">expunged</code>还是真实地址</li>
+</ul>
+
+<p>而当<code class="language-plaintext highlighter-rouge">key</code>不存在于<code class="language-plaintext highlighter-rouge">read.m</code>中、<code class="language-plaintext highlighter-rouge">read.amended == true</code>时，<code class="language-plaintext highlighter-rouge">Load</code>需要去<code class="language-plaintext highlighter-rouge">dirty</code>中检查一次。</p>
+
+<h5 id="store操作">Store操作</h5>
+
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="k">func</span> <span class="p">(</span><span class="n">m</span> <span class="o">*</span><span class="n">Map</span><span class="p">)</span> <span class="n">Store</span><span class="p">(</span><span class="n">key</span><span class="p">,</span> <span class="n">value</span> <span class="k">interface</span><span class="p">{})</span> <span class="p">{</span>
+    <span class="n">read</span><span class="p">,</span> <span class="n">_</span> <span class="o">:=</span> <span class="n">m</span><span class="o">.</span><span class="n">read</span><span class="o">.</span><span class="n">Load</span><span class="p">()</span><span class="o">.</span><span class="p">(</span><span class="n">readOnly</span><span class="p">)</span>
+  <span class="c">// tryStore：当e.p为expunged时返回false，否则存储</span>
+    <span class="k">if</span> <span class="n">e</span><span class="p">,</span> <span class="n">ok</span> <span class="o">:=</span> <span class="n">read</span><span class="o">.</span><span class="n">m</span><span class="p">[</span><span class="n">key</span><span class="p">];</span> <span class="n">ok</span> <span class="o">&amp;&amp;</span> <span class="n">e</span><span class="o">.</span><span class="n">tryStore</span><span class="p">(</span><span class="o">&amp;</span><span class="n">value</span><span class="p">)</span> <span class="p">{</span> 
+    <span class="c">// 这里，未加锁尝试store</span>
+    <span class="c">// 因为read的entry非expunged时，要么dirty为空则无需操作dirty</span>
+    <span class="c">// 否则该entry指针一定和dirty中对应的entry指针指向同一entry</span>
+    <span class="c">// 因此只需改这里就可以使dirty中值保持一致（从而也无需加锁）</span>
+        <span class="k">return</span> 
+    <span class="p">}</span> 
+
+    <span class="n">m</span><span class="o">.</span><span class="n">mu</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span> <span class="c">// 否则需要加锁访问</span>
+    <span class="n">read</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">read</span><span class="o">.</span><span class="n">Load</span><span class="p">()</span><span class="o">.</span><span class="p">(</span><span class="n">readOnly</span><span class="p">)</span>
+    <span class="k">if</span> <span class="n">e</span><span class="p">,</span> <span class="n">ok</span> <span class="o">:=</span> <span class="n">read</span><span class="o">.</span><span class="n">m</span><span class="p">[</span><span class="n">key</span><span class="p">];</span> <span class="n">ok</span> <span class="p">{</span>
+        <span class="k">if</span> <span class="n">e</span><span class="o">.</span><span class="n">unexpungeLocked</span><span class="p">()</span> <span class="p">{</span> <span class="c">// 此前e为expunged状态，将对应`e.p`置为nil</span>
+            <span class="c">// expunged状态说明此时dirty不为nil且该键不在dirty中，直接存到dirty</span>
+            <span class="n">m</span><span class="o">.</span><span class="n">dirty</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">e</span>
+        <span class="p">}</span>
+        <span class="n">e</span><span class="o">.</span><span class="n">storeLocked</span><span class="p">(</span><span class="o">&amp;</span><span class="n">value</span><span class="p">)</span> <span class="c">// 然后store pointer到entry e</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="k">if</span> <span class="n">e</span><span class="p">,</span> <span class="n">ok</span> <span class="o">:=</span> <span class="n">m</span><span class="o">.</span><span class="n">dirty</span><span class="p">[</span><span class="n">key</span><span class="p">];</span> <span class="n">ok</span> <span class="p">{</span> <span class="c">// 此时为dirty中有值的状态</span>
+        <span class="n">e</span><span class="o">.</span><span class="n">storeLocked</span><span class="p">(</span><span class="o">&amp;</span><span class="n">value</span><span class="p">)</span>
+    <span class="p">}</span> <span class="k">else</span> <span class="p">{</span> <span class="c">// 此时为dirty中无该值的状态</span>
+        <span class="k">if</span> <span class="o">!</span><span class="n">read</span><span class="o">.</span><span class="n">amended</span> <span class="p">{</span> <span class="c">// 此时为dirty中第一个值</span>
+            <span class="n">m</span><span class="o">.</span><span class="n">dirtyLocked</span><span class="p">()</span> <span class="c">// 创建m.dirty并根据read初始化，如下</span>
+<span class="c">/*
+func (m *Map) dirtyLocked() {
+    if m.dirty != nil { // 此时m.dirty一定是nil，否则不会调用dirtyLocked
+        return
+    }
+
+    read, _ := m.read.Load().(readOnly)
+    m.dirty = make(map[interface{}]*entry, len(read.m))
+    for k, e := range read.m { // 处理read中每个entry
+        if !e.tryExpungeLocked() { // 将read中含空指针的entry变为expunged并返回true
+            m.dirty[k] = e // 因此read中为expunged的entry在dirty中一定不存在对应entry
+        }
+    }
+}*/</span>
+      <span class="c">// 现在有dirty了，改动amended</span>
+            <span class="n">m</span><span class="o">.</span><span class="n">read</span><span class="o">.</span><span class="n">Store</span><span class="p">(</span><span class="n">readOnly</span><span class="p">{</span><span class="n">m</span><span class="o">:</span> <span class="n">read</span><span class="o">.</span><span class="n">m</span><span class="p">,</span> <span class="n">amended</span><span class="o">:</span> <span class="no">true</span><span class="p">})</span> 
+        <span class="p">}</span>
+        <span class="n">m</span><span class="o">.</span><span class="n">dirty</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="o">=</span> <span class="n">newEntry</span><span class="p">(</span><span class="n">value</span><span class="p">)</span> <span class="c">// 在dirty中存储新值，此时该值仅在dirty中存在</span>
+    <span class="p">}</span>
+    <span class="n">m</span><span class="o">.</span><span class="n">mu</span><span class="o">.</span><span class="n">Unlock</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>因此我们可以知道，<code class="language-plaintext highlighter-rouge">Store</code>在<code class="language-plaintext highlighter-rouge">key</code>对应的entry <code class="language-plaintext highlighter-rouge">e.p != expunged</code>时不用加锁，除此之外都需要加锁，包括：</p>
+
+<ul>
+  <li><code class="language-plaintext highlighter-rouge">e.p == expunged</code>状态，需要<code class="language-plaintext highlighter-rouge">m.dirty[key] = e</code></li>
+  <li>当<code class="language-plaintext highlighter-rouge">key</code>不在<code class="language-plaintext highlighter-rouge">read.m</code>中时，需要直接写到<code class="language-plaintext highlighter-rouge">dirty</code>（可能触发<code class="language-plaintext highlighter-rouge">dirty</code>从<code class="language-plaintext highlighter-rouge">read</code>的浅拷贝）</li>
+</ul>
+
+<h5 id="delete操作">Delete操作</h5>
+<div class="language-go highlighter-rouge"><div class="highlight"><pre class="highlight"><code><span class="c">// LoadAndDelete被Delete调用，是实施删除键值的函数</span>
+<span class="k">func</span> <span class="p">(</span><span class="n">m</span> <span class="o">*</span><span class="n">Map</span><span class="p">)</span> <span class="n">LoadAndDelete</span><span class="p">(</span><span class="n">key</span> <span class="k">interface</span><span class="p">{})</span> <span class="p">(</span><span class="n">value</span> <span class="k">interface</span><span class="p">{},</span> <span class="n">loaded</span> <span class="kt">bool</span><span class="p">)</span> <span class="p">{</span>
+    <span class="n">read</span><span class="p">,</span> <span class="n">_</span> <span class="o">:=</span> <span class="n">m</span><span class="o">.</span><span class="n">read</span><span class="o">.</span><span class="n">Load</span><span class="p">()</span><span class="o">.</span><span class="p">(</span><span class="n">readOnly</span><span class="p">)</span>
+  <span class="n">e</span><span class="p">,</span> <span class="n">ok</span> <span class="o">:=</span> <span class="n">read</span><span class="o">.</span><span class="n">m</span><span class="p">[</span><span class="n">key</span><span class="p">]</span> <span class="c">// 如果在read中找到，直接跳到下方e.delete()</span>
+    <span class="k">if</span> <span class="o">!</span><span class="n">ok</span> <span class="o">&amp;&amp;</span> <span class="n">read</span><span class="o">.</span><span class="n">amended</span> <span class="p">{</span> <span class="c">// 说明仅仅存在于dirty中</span>
+        <span class="n">m</span><span class="o">.</span><span class="n">mu</span><span class="o">.</span><span class="n">Lock</span><span class="p">()</span>
+        <span class="n">read</span><span class="p">,</span> <span class="n">_</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">read</span><span class="o">.</span><span class="n">Load</span><span class="p">()</span><span class="o">.</span><span class="p">(</span><span class="n">readOnly</span><span class="p">)</span> <span class="c">// 双重检查</span>
+        <span class="n">e</span><span class="p">,</span> <span class="n">ok</span> <span class="o">=</span> <span class="n">read</span><span class="o">.</span><span class="n">m</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+        <span class="k">if</span> <span class="o">!</span><span class="n">ok</span> <span class="o">&amp;&amp;</span> <span class="n">read</span><span class="o">.</span><span class="n">amended</span> <span class="p">{</span>
+            <span class="n">e</span><span class="p">,</span> <span class="n">ok</span> <span class="o">=</span> <span class="n">m</span><span class="o">.</span><span class="n">dirty</span><span class="p">[</span><span class="n">key</span><span class="p">]</span>
+            <span class="nb">delete</span><span class="p">(</span><span class="n">m</span><span class="o">.</span><span class="n">dirty</span><span class="p">,</span> <span class="n">key</span><span class="p">)</span> <span class="c">// 在dirty中删除，此时read、dirty中都不再有该键</span>
+            <span class="n">m</span><span class="o">.</span><span class="n">missLocked</span><span class="p">()</span> <span class="c">// 增加misses，如果需要则用dirty替换read</span>
+        <span class="p">}</span>
+        <span class="n">m</span><span class="o">.</span><span class="n">mu</span><span class="o">.</span><span class="n">Unlock</span><span class="p">()</span>
+    <span class="p">}</span>
+    <span class="k">if</span> <span class="n">ok</span> <span class="p">{</span>
+        <span class="k">return</span> <span class="n">e</span><span class="o">.</span><span class="nb">delete</span><span class="p">()</span> <span class="c">// 如果有真实值，则将其置为nil</span>
+<span class="c">/*
+func (e *entry) delete() (value interface{}, ok bool) {
+    for {
+        p := atomic.LoadPointer(&amp;e.p)
+        if p == nil || p == expunged {
+            return nil, false
+        }
+        if atomic.CompareAndSwapPointer(&amp;e.p, p, nil) {
+            return *(*interface{})(p), true
+        }
+    }
+} */</span>
+    <span class="p">}</span>
+    <span class="k">return</span> <span class="no">nil</span><span class="p">,</span> <span class="no">false</span>
+<span class="p">}</span>
+</code></pre></div></div>
+
+<p>和<code class="language-plaintext highlighter-rouge">Load</code>类似，删除<code class="language-plaintext highlighter-rouge">read</code>中存在的键值无需加锁，否则需要加锁然后直接<code class="language-plaintext highlighter-rouge">delete(dirty, key)</code>。</p>
+
+<h5 id="为何需要expunged的值">为何需要expunged的值</h5>
+
+<p>entry的指针一共有三个可选值，<code class="language-plaintext highlighter-rouge">nil</code>、<code class="language-plaintext highlighter-rouge">expunged</code>和指向真实的元素。为了弄清楚为什么使用<code class="language-plaintext highlighter-rouge">expunged</code>，我们需要知道：</p>
+
+<ul>
+  <li>指针在什么时候会变为<code class="language-plaintext highlighter-rouge">expunged</code>的值</li>
+  <li>为什么不仅仅使用<code class="language-plaintext highlighter-rouge">nil</code></li>
+</ul>
+
+<p>第一点，通过阅读代码我们知道，一个entry的<code class="language-plaintext highlighter-rouge">p</code>变为<code class="language-plaintext highlighter-rouge">expunged</code>当且仅当在加锁后、<code class="language-plaintext highlighter-rouge">dirty</code>为空，从<code class="language-plaintext highlighter-rouge">read</code>浅拷贝所有entry指针到<code class="language-plaintext highlighter-rouge">dirty</code>的时候——此时的read中所有<code class="language-plaintext highlighter-rouge">p</code>为<code class="language-plaintext highlighter-rouge">nil</code>的entry指针，<code class="language-plaintext highlighter-rouge">p</code>都变为<code class="language-plaintext highlighter-rouge">expunged</code>，此时<code class="language-plaintext highlighter-rouge">dirty</code>中将不会有对应entry的指针。</p>
+
+<p>第二点，我们来看看如果仅仅使用<code class="language-plaintext highlighter-rouge">nil</code>会发生什么：</p>
+
+<ul>
+  <li>如果<code class="language-plaintext highlighter-rouge">nil</code>在<code class="language-plaintext highlighter-rouge">read</code>浅拷贝至<code class="language-plaintext highlighter-rouge">dirty</code>的时候仍然保留entry的指针，即拷贝完成后，对应键值下<code class="language-plaintext highlighter-rouge">read</code>和<code class="language-plaintext highlighter-rouge">dirty</code>中都有对应键下entry e的指针，且<code class="language-plaintext highlighter-rouge">e.p = nil</code>，那么之后在<code class="language-plaintext highlighter-rouge">dirty</code>跃升为<code class="language-plaintext highlighter-rouge">read</code>的时候对应entry的指针仍然会保留——那么对应键的entry指针<strong>永远都会存在</strong>，也就是说，<code class="language-plaintext highlighter-rouge">sync.Map</code>的规模只会越来越大；</li>
+  <li>如果<code class="language-plaintext highlighter-rouge">nil</code>在<code class="language-plaintext highlighter-rouge">read</code>浅拷贝时不进入<code class="language-plaintext highlighter-rouge">dirty</code>，那么之后store对应键的时候，就会出现<code class="language-plaintext highlighter-rouge">read</code>和<code class="language-plaintext highlighter-rouge">dirty</code>不同步的情况，即此时<code class="language-plaintext highlighter-rouge">read</code>中包含<code class="language-plaintext highlighter-rouge">dirty</code>不包含的键，那么之后用<code class="language-plaintext highlighter-rouge">dirty</code>替换<code class="language-plaintext highlighter-rouge">read</code>的时候就会出现数据丢失的问题；</li>
+  <li>如果<code class="language-plaintext highlighter-rouge">nil</code>在<code class="language-plaintext highlighter-rouge">read</code>浅拷贝时直接把<code class="language-plaintext highlighter-rouge">read</code>中对应键删除（从而避免了不同步的问题），但这又必须对<code class="language-plaintext highlighter-rouge">read</code>加锁，违背了<code class="language-plaintext highlighter-rouge">read</code>读写不加锁的初衷。</li>
+</ul>
+
+<h5 id="syncmap优化了哪些情况下的性能">sync.Map优化了哪些情况下的性能</h5>
+
+<p>从代码中我们可以知道，对于<code class="language-plaintext highlighter-rouge">read</code>的访问是不需要加锁的，因此对于读多更新多而插入新值少的情况，也就是读写删的键值范围基本固定的情况下，<code class="language-plaintext highlighter-rouge">sync.Map</code>有着更佳的性能，因为读写删存在的键基本无需加锁；反复插入与读取新值，即操作dirty的情况更多时，<code class="language-plaintext highlighter-rouge">sync.Map</code>需要频繁加锁、更新<code class="language-plaintext highlighter-rouge">read</code>，从而性能会变差，因此不适合作为in-memory数据库使用（这样的情形更适合于使用利用分段锁的map）。</p>
+</div><section class="article__sharing d-print-none"></section><div class="d-print-none"><footer class="article__footer"><meta itemprop="dateModified" content="2020-11-27T00:00:00+00:00"><!-- start custom article footer snippet -->
+
+<!-- end custom article footer snippet -->
+<div class="article__subscribe"><div class="subscribe"><i class="fas fa-rss"></i> <a type="application/rss+xml" href="/feed.xml">订阅</a></div>
+</div><div class="article__license"><div class="license">
+    <p>本文遵守 <a itemprop="license" rel="license" href="https://creativecommons.org/licenses/by-nc-sa/4.0/">Attribution-NonCommercial-ShareAlike 4.0 International</a> 许可协议。
+      <a rel="license" href="https://creativecommons.org/licenses/by-nc-sa/4.0/">
+        <img alt="Attribution-NonCommercial-ShareAlike 4.0 International" src="https://i.creativecommons.org/l/by-nc-sa/4.0/88x31.png" />
+      </a>
+    </p>
+  </div></div></footer>
+<div class="article__section-navigator clearfix"><div class="previous"><span>上篇</span><a href="/2020/06/28/%E6%89%94%E7%90%83%E8%BF%9B%E6%A1%B6%E4%B8%8E%E8%B4%9F%E8%BD%BD%E5%9D%87%E8%A1%A1.html">扔球进桶与负载均衡</a></div><div class="next"><span>下篇</span><a href="/2021/02/19/%E6%B7%B1%E5%85%A5Go-%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E7%9A%84%E6%BC%94%E8%BF%9B.html">深入Go：垃圾回收的演进</a></div></div></div>
+
+</div>
+
+<script>(function() {
+  var SOURCES = window.TEXT_VARIABLES.sources;
+  window.Lazyload.js(SOURCES.jquery, function() {
+    $(function() {
+      var $this ,$scroll;
+      var $articleContent = $('.js-article-content');
+      var hasSidebar = $('.js-page-root').hasClass('layout--page--sidebar');
+      var scroll = hasSidebar ? '.js-page-main' : 'html, body';
+      $scroll = $(scroll);
+
+      $articleContent.find('.highlight').each(function() {
+        $this = $(this);
+        $this.attr('data-lang', $this.find('code').attr('data-lang'));
+      });
+      $articleContent.find('h1[id], h2[id], h3[id], h4[id], h5[id], h6[id]').each(function() {
+        $this = $(this);
+        $this.append($('<a class="anchor d-print-none" aria-hidden="true"></a>').html('<i class="fas fa-anchor"></i>'));
+      });
+      $articleContent.on('click', '.anchor', function() {
+        $scroll.scrollToAnchor('#' + $(this).parent().attr('id'), 400);
+      });
+    });
+  });
+})();
+</script>
+</div><section class="page__comments d-print-none"></section></article><!-- start custom main bottom snippet -->
+
+<!-- end custom main bottom snippet -->
+</div>
+            </div></div></div><div class="page__footer d-print-none">
+<footer class="footer py-4 js-page-footer">
+  <div class="main"><div itemscope itemtype="http://schema.org/Person">
+      <meta itemprop="name" content="Wenxing Lai"><meta itemprop="url" content="/wenxinglai.github.io"><meta itemprop="description" content="I am an amazing person."><div class="footer__author-links"><div class="author-links">
+  <ul class="menu menu--nowrap menu--inline"><link itemprop="url" href="wenxinglai.github.io"><li title="给我发邮件。">
+      <a class="button button--circle mail-button" itemprop="email" href="mailto:wenxing.lai@outlook.com" target="_blank">
+        <i class="fas fa-envelope"></i>
+      </a><li title="在 Linkedin 上关注我。">
+        <a class="button button--circle linkedin-button" itemprop="sameAs" href="https://www.linkedin.com/in/https://www.linkedin.com/in/wenxinglai" target="_blank">
+          <div class="icon"><svg fill="#000000" width="24px" height="24px" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+  <path d="M260.096 155.648c0 27.307008-9.899008 50.516992-29.696 69.632-19.796992 19.115008-45.396992 28.672-76.8 28.672-30.036992 0-54.612992-9.556992-73.728-28.672-19.115008-19.115008-28.672-42.324992-28.672-69.632 0-28.672 9.556992-52.224 28.672-70.656 19.115008-18.432 44.372992-27.648 75.776-27.648 31.403008 0 56.32 9.216 74.752 27.648 18.432 18.432 28.331008 41.984 29.696 70.656 0 0 0 0 0 0m-202.752 808.96c0 0 0-632.832 0-632.832 0 0 196.608 0 196.608 0 0 0 0 632.832 0 632.832 0 0-196.608 0-196.608 0 0 0 0 0 0 0m313.344-430.08c0-58.708992-1.364992-126.292992-4.096-202.752 0 0 169.984 0 169.984 0 0 0 10.24 88.064 10.24 88.064 0 0 4.096 0 4.096 0 40.96-68.267008 105.812992-102.4 194.56-102.4 68.267008 0 123.220992 22.868992 164.864 68.608 41.643008 45.739008 62.464 113.664 62.464 203.776 0 0 0 374.784 0 374.784 0 0-196.608 0-196.608 0 0 0 0-350.208 0-350.208 0-91.476992-33.451008-137.216-100.352-137.216-47.787008 0-81.236992 24.576-100.352 73.728-4.096 8.192-6.144 24.576-6.144 49.152 0 0 0 364.544 0 364.544 0 0-198.656 0-198.656 0 0 0 0-430.08 0-430.08 0 0 0 0 0 0" />
+</svg>
+</div>
+        </a>
+      </li><li title="在 Github 上关注我。">
+        <a class="button button--circle github-button" itemprop="sameAs" href="https://github.com/https://github.com/wenxinglai" target="_blank">
+          <div class="icon"><svg fill="#000000" width="24px" height="24px" viewBox="0 0 1024 1024" version="1.1" xmlns="http://www.w3.org/2000/svg">
+  <path class="svgpath" data-index="path_0" fill="#272636" d="M0 525.2c0 223.6 143.3 413.7 343 483.5 26.9 6.8 22.8-12.4 22.8-25.4l0-88.7c-155.3 18.2-161.5-84.6-172-101.7-21.1-36-70.8-45.2-56-62.3 35.4-18.2 71.4 4.6 113.1 66.3 30.2 44.7 89.1 37.2 119 29.7 6.5-26.9 20.5-50.9 39.7-69.6C248.8 728.2 181.7 630 181.7 513.2c0-56.6 18.7-108.7 55.3-150.7-23.3-69.3 2.2-128.5 5.6-137.3 66.5-6 135.5 47.6 140.9 51.8 37.8-10.2 80.9-15.6 129.1-15.6 48.5 0 91.8 5.6 129.8 15.9 12.9-9.8 77-55.8 138.8-50.2 3.3 8.8 28.2 66.7 6.3 135 37.1 42.1 56 94.6 56 151.4 0 117-67.5 215.3-228.8 243.7 26.9 26.6 43.6 63.4 43.6 104.2l0 128.8c0.9 10.3 0 20.5 17.2 20.5C878.1 942.4 1024 750.9 1024 525.3c0-282.9-229.3-512-512-512C229.1 13.2 0 242.3 0 525.2L0 525.2z" />
+</svg>
+</div>
+        </a>
+      </li></ul>
+</div>
+</div>
+    </div><div class="site-info mt-2">
+      <div>© Wenxing Lai 2021,
+        Powered by <a title="Jekyll is a simple, blog-aware, static site generator." href="http://jekyllrb.com/">Jekyll</a> & <a
+        title="TeXt is a super customizable Jekyll theme." href="https://github.com/kitian616/jekyll-TeXt-theme">TeXt Theme</a>.
+      </div>
+    </div>
+  </div>
+</footer>
+</div></div>
+    </div><script>(function() {
+  var SOURCES = window.TEXT_VARIABLES.sources;
+  window.Lazyload.js(SOURCES.jquery, function() {
+    var $body = $('body'), $window = $(window);
+    var $pageRoot = $('.js-page-root'), $pageMain = $('.js-page-main');
+    var activeCount = 0;
+    function modal(options) {
+      var $root = this, visible, onChange, hideWhenWindowScroll = false;
+      var scrollTop;
+      function setOptions(options) {
+        var _options = options || {};
+        visible = _options.initialVisible === undefined ? false : show;
+        onChange = _options.onChange;
+        hideWhenWindowScroll = _options.hideWhenWindowScroll;
+      }
+      function init() {
+        setState(visible);
+      }
+      function setState(isShow) {
+        if (isShow === visible) {
+          return;
+        }
+        visible = isShow;
+        if (visible) {
+          activeCount++;
+          scrollTop = $(window).scrollTop() || $pageMain.scrollTop();
+          $root.addClass('modal--show');
+          $pageMain.scrollTop(scrollTop);
+          activeCount === 1 && ($pageRoot.addClass('show-modal'), $body.addClass('of-hidden'));
+          hideWhenWindowScroll && window.hasEvent('touchstart') && $window.on('scroll', hide);
+          $window.on('keyup', handleKeyup);
+        } else {
+          activeCount > 0 && activeCount--;
+          $root.removeClass('modal--show');
+          $window.scrollTop(scrollTop);
+          activeCount === 0 && ($pageRoot.removeClass('show-modal'), $body.removeClass('of-hidden'));
+          hideWhenWindowScroll && window.hasEvent('touchstart') && $window.off('scroll', hide);
+          $window.off('keyup', handleKeyup);
+        }
+        onChange && onChange(visible);
+      }
+      function show() {
+        setState(true);
+      }
+      function hide() {
+        setState(false);
+      }
+      function handleKeyup(e) {
+        // Char Code: 27  ESC
+        if (e.which ===  27) {
+          hide();
+        }
+      }
+      setOptions(options);
+      init();
+      return {
+        show: show,
+        hide: hide,
+        $el: $root
+      };
+    }
+    $.fn.modal = modal;
+  });
+})();
+</script><div class="modal modal--overflow page__search-modal d-print-none js-page-search-modal"><script>
+(function () {
+  var SOURCES = window.TEXT_VARIABLES.sources;
+  window.Lazyload.js(SOURCES.jquery, function() {
+    // search panel
+    var search = (window.search || (window.search = {}));
+    var useDefaultSearchBox = window.useDefaultSearchBox === undefined ?
+      true : window.useDefaultSearchBox ;
+
+    var $searchModal = $('.js-page-search-modal');
+    var $searchToggle = $('.js-search-toggle');
+    var searchModal = $searchModal.modal({ onChange: handleModalChange, hideWhenWindowScroll: true });
+    var modalVisible = false;
+    search.searchModal = searchModal;
+
+    var $searchBox = null;
+    var $searchInput = null;
+    var $searchClear = null;
+
+    function getModalVisible() {
+      return modalVisible;
+    }
+    search.getModalVisible = getModalVisible;
+
+    function handleModalChange(visible) {
+      modalVisible = visible;
+      if (visible) {
+        search.onShow && search.onShow();
+        useDefaultSearchBox && $searchInput[0] && $searchInput[0].focus();
+      } else {
+        search.onShow && search.onHide();
+        useDefaultSearchBox && $searchInput[0] && $searchInput[0].blur();
+        setTimeout(function() {
+          useDefaultSearchBox && ($searchInput.val(''), $searchBox.removeClass('not-empty'));
+          search.clear && search.clear();
+          window.pageAsideAffix && window.pageAsideAffix.refresh();
+        }, 400);
+      }
+    }
+
+    $searchToggle.on('click', function() {
+      modalVisible ? searchModal.hide() : searchModal.show();
+    });
+    // Char Code: 83  S, 191 /
+    $(window).on('keyup', function(e) {
+      if (!modalVisible && !window.isFormElement(e.target || e.srcElement) && (e.which === 83 || e.which === 191)) {
+        modalVisible || searchModal.show();
+      }
+    });
+
+    if (useDefaultSearchBox) {
+      $searchBox = $('.js-search-box');
+      $searchInput = $searchBox.children('input');
+      $searchClear = $searchBox.children('.js-icon-clear');
+      search.getSearchInput = function() {
+        return $searchInput.get(0);
+      };
+      search.getVal = function() {
+        return $searchInput.val();
+      };
+      search.setVal = function(val) {
+        $searchInput.val(val);
+      };
+
+      $searchInput.on('focus', function() {
+        $(this).addClass('focus');
+      });
+      $searchInput.on('blur', function() {
+        $(this).removeClass('focus');
+      });
+      $searchInput.on('input', window.throttle(function() {
+        var val = $(this).val();
+        if (val === '' || typeof val !== 'string') {
+          search.clear && search.clear();
+        } else {
+          $searchBox.addClass('not-empty');
+          search.onInputNotEmpty && search.onInputNotEmpty(val);
+        }
+      }, 400));
+      $searchClear.on('click', function() {
+        $searchInput.val(''); $searchBox.removeClass('not-empty');
+        search.clear && search.clear();
+      });
+    }
+  });
+})();
+</script><div class="search search--dark">
+  <div class="main">
+    <div class="search__header">搜索</div>
+    <div class="search-bar">
+      <div class="search-box js-search-box">
+        <div class="search-box__icon-search"><i class="fas fa-search"></i></div>
+        <input type="text" />
+        <div class="search-box__icon-clear js-icon-clear">
+          <a><i class="fas fa-times"></i></a>
+        </div>
+      </div>
+      <button class="button button--theme-dark button--pill search__cancel js-search-toggle">
+        取消</button>
+    </div>
+    <div class="search-result js-search-result"></div>
+  </div>
+</div>
+<script>var SOURCES = window.TEXT_VARIABLES.sources;
+var PAHTS = window.TEXT_VARIABLES.paths;
+window.Lazyload.js([SOURCES.jquery, PAHTS.search_js], function() {
+  var search = (window.search || (window.search = {}));
+  var searchData = window.TEXT_SEARCH_DATA || {};
+
+  function memorize(f) {
+    var cache = {};
+    return function () {
+      var key = Array.prototype.join.call(arguments, ',');
+      if (key in cache) return cache[key];
+      else return cache[key] = f.apply(this, arguments);
+    };
+  }
+
+  /// search
+  function searchByQuery(query) {
+    var i, j, key, keys, cur, _title, result = {};
+    keys = Object.keys(searchData);
+    for (i = 0; i < keys.length; i++) {
+      key = keys[i];
+      for (j = 0; j < searchData[key].length; j++) {
+        cur = searchData[key][j], _title = cur.title;
+        if ((result[key] === undefined || result[key] && result[key].length < 4 )
+          && _title.toLowerCase().indexOf(query.toLowerCase()) >= 0) {
+          if (result[key] === undefined) {
+            result[key] = [];
+          }
+          result[key].push(cur);
+        }
+      }
+    }
+    return result;
+  }
+
+  var renderHeader = memorize(function(header) {
+    return $('<p class="search-result__header">' + header + '</p>');
+  });
+
+  var renderItem = function(index, title, url) {
+    return $('<li class="search-result__item" data-index="' + index + '"><a class="button" href="' + url + '">' + title + '</a></li>');
+  };
+
+  function render(data) {
+    if (!data) { return null; }
+    var $root = $('<ul></ul>'), i, j, key, keys, cur, itemIndex = 0;
+    keys = Object.keys(data);
+    for (i = 0; i < keys.length; i++) {
+      key = keys[i];
+      $root.append(renderHeader(key));
+      for (j = 0; j < data[key].length; j++) {
+        cur = data[key][j];
+        $root.append(renderItem(itemIndex++, cur.title, cur.url));
+      }
+    }
+    return $root;
+  }
+
+  // search box
+  var $result = $('.js-search-result'), $resultItems;
+  var lastActiveIndex, activeIndex;
+
+  function clear() {
+    $result.html(null);
+    $resultItems = $('.search-result__item'); activeIndex = 0;
+  }
+  function onInputNotEmpty(val) {
+    $result.html(render(searchByQuery(val)));
+    $resultItems = $('.search-result__item'); activeIndex = 0;
+    $resultItems.eq(0).addClass('active');
+  }
+
+  search.clear = clear;
+  search.onInputNotEmpty = onInputNotEmpty;
+
+  function updateResultItems() {
+    lastActiveIndex >= 0 && $resultItems.eq(lastActiveIndex).removeClass('active');
+    activeIndex >= 0 && $resultItems.eq(activeIndex).addClass('active');
+  }
+
+  function moveActiveIndex(direction) {
+    var itemsCount = $resultItems ? $resultItems.length : 0;
+    if (itemsCount > 1) {
+      lastActiveIndex = activeIndex;
+      if (direction === 'up') {
+        activeIndex = (activeIndex - 1 + itemsCount) % itemsCount;
+      } else if (direction === 'down') {
+        activeIndex = (activeIndex + 1 + itemsCount) % itemsCount;
+      }
+      updateResultItems();
+    }
+  }
+
+  // Char Code: 13  Enter, 37  ⬅, 38  ⬆, 39  ➡, 40  ⬇
+  $(window).on('keyup', function(e) {
+    var modalVisible = search.getModalVisible && search.getModalVisible();
+    if (modalVisible) {
+      if (e.which === 38) {
+        modalVisible && moveActiveIndex('up');
+      } else if (e.which === 40) {
+        modalVisible && moveActiveIndex('down');
+      } else if (e.which === 13) {
+        modalVisible && $resultItems && activeIndex >= 0 && $resultItems.eq(activeIndex).children('a')[0].click();
+      }
+    }
+  });
+
+  $result.on('mouseover', '.search-result__item > a', function() {
+    var itemIndex = $(this).parent().data('index');
+    itemIndex >= 0 && (lastActiveIndex = activeIndex, activeIndex = itemIndex, updateResultItems());
+  });
+});
+</script>
+</div></div>
+
+
+<script>(function() {
+  var SOURCES = window.TEXT_VARIABLES.sources;
+  window.Lazyload.js(SOURCES.jquery, function() {
+    function scrollToAnchor(anchor, duration, callback) {
+      var $root = this;
+      $root.animate({ scrollTop: $(anchor).position().top }, duration, function() {
+        window.history.replaceState(null, '', window.location.href.split('#')[0] + anchor);
+        callback && callback();
+      });
+    }
+    $.fn.scrollToAnchor = scrollToAnchor;
+  });
+})();
+(function() {
+  var SOURCES = window.TEXT_VARIABLES.sources;
+  window.Lazyload.js(SOURCES.jquery, function() {
+    function affix(options) {
+      var $root = this, $window = $(window), $scrollTarget, $scroll,
+        offsetBottom = 0, scrollTarget = window, scroll = window.document, disabled = false, isOverallScroller = true,
+        rootTop, rootLeft, rootHeight, scrollBottom, rootBottomTop,
+        hasInit = false, curState;
+
+      function setOptions(options) {
+        var _options = options || {};
+        _options.offsetBottom && (offsetBottom = _options.offsetBottom);
+        _options.scrollTarget && (scrollTarget = _options.scrollTarget);
+        _options.scroll && (scroll = _options.scroll);
+        _options.disabled !== undefined && (disabled = _options.disabled);
+        $scrollTarget = $(scrollTarget);
+        isOverallScroller = window.isOverallScroller($scrollTarget[0]);
+        $scroll = $(scroll);
+      }
+      function preCalc() {
+        top();
+        rootHeight = $root.outerHeight();
+        rootTop = $root.offset().top + (isOverallScroller ? 0 :  $scrollTarget.scrollTop());
+        rootLeft = $root.offset().left;
+      }
+      function calc(needPreCalc) {
+        needPreCalc && preCalc();
+        scrollBottom = $scroll.outerHeight() - offsetBottom - rootHeight;
+        rootBottomTop = scrollBottom - rootTop;
+      }
+      function top() {
+        if (curState !== 'top') {
+          $root.removeClass('fixed').css({
+            left: 0,
+            top: 0
+          });
+          curState = 'top';
+        }
+      }
+      function fixed() {
+        if (curState !== 'fixed') {
+          $root.addClass('fixed').css({
+            left: rootLeft + 'px',
+            top: 0
+          });
+          curState = 'fixed';
+        }
+      }
+      function bottom() {
+        if (curState !== 'bottom') {
+          $root.removeClass('fixed').css({
+            left: 0,
+            top: rootBottomTop + 'px'
+          });
+          curState = 'bottom';
+        }
+      }
+      function setState() {
+        var scrollTop = $scrollTarget.scrollTop();
+        if (scrollTop >= rootTop && scrollTop <= scrollBottom) {
+          fixed();
+        } else if (scrollTop < rootTop) {
+          top();
+        } else {
+          bottom();
+        }
+      }
+      function init() {
+        if(!hasInit) {
+          var interval, timeout;
+          calc(true); setState();
+          // run calc every 100 millisecond
+          interval = setInterval(function() {
+            calc();
+          }, 100);
+          timeout = setTimeout(function() {
+            clearInterval(interval);
+          }, 45000);
+          window.pageLoad.then(function() {
+            setTimeout(function() {
+              clearInterval(interval);
+              clearTimeout(timeout);
+            }, 3000);
+          });
+          $scrollTarget.on('scroll', function() {
+            disabled || setState();
+          });
+          $window.on('resize', function() {
+            disabled || (calc(true), setState());
+          });
+          hasInit = true;
+        }
+      }
+
+      setOptions(options);
+      if (!disabled) {
+        init();
+      }
+      $window.on('resize', window.throttle(function() {
+        init();
+      }, 200));
+      return {
+        setOptions: setOptions,
+        refresh: function() {
+          calc(true, { animation: false }); setState();
+        }
+      };
+    }
+    $.fn.affix = affix;
+  });
+})();
+(function() {
+  var SOURCES = window.TEXT_VARIABLES.sources;
+  window.Lazyload.js(SOURCES.jquery, function() {
+    function toc(options) {
+      var $root = this, $window = $(window), $scrollTarget, $scroller, $tocUl = $('<ul class="toc toc--ellipsis"></ul>'), $tocLi, $headings, $activeLast, $activeCur,
+        selectors = 'h1,h2,h3', container = 'body', scrollTarget = window, scroller = 'html, body', disabled = false,
+        headingsPos, scrolling = false, hasRendered = false, hasInit = false;
+
+      function setOptions(options) {
+        var _options = options || {};
+        _options.selectors && (selectors = _options.selectors);
+        _options.container && (container = _options.container);
+        _options.scrollTarget && (scrollTarget = _options.scrollTarget);
+        _options.scroller && (scroller = _options.scroller);
+        _options.disabled !== undefined && (disabled = _options.disabled);
+        $headings = $(container).find(selectors).filter('[id]');
+        $scrollTarget = $(scrollTarget);
+        $scroller = $(scroller);
+      }
+      function calc() {
+        headingsPos = [];
+        $headings.each(function() {
+          headingsPos.push(Math.floor($(this).position().top));
+        });
+      }
+      function setState(element, disabled) {
+        var scrollTop = $scrollTarget.scrollTop(), i;
+        if (disabled || !headingsPos || headingsPos.length < 1) { return; }
+        if (element) {
+          $activeCur = element;
+        } else {
+          for (i = 0; i < headingsPos.length; i++) {
+            if (scrollTop >= headingsPos[i]) {
+              $activeCur = $tocLi.eq(i);
+            } else {
+              $activeCur || ($activeCur = $tocLi.eq(i));
+              break;
+            }
+          }
+        }
+        $activeLast && $activeLast.removeClass('active');
+        ($activeLast = $activeCur).addClass('active');
+      }
+      function render() {
+        if(!hasRendered) {
+          $root.append($tocUl);
+          $headings.each(function() {
+            var $this = $(this);
+            $tocUl.append($('<li></li>').addClass('toc-' + $this.prop('tagName').toLowerCase())
+              .append($('<a></a>').text($this.text()).attr('href', '#' + $this.prop('id'))));
+          });
+          $tocLi = $tocUl.children('li');
+          $tocUl.on('click', 'a', function(e) {
+            e.preventDefault();
+            var $this = $(this);
+            scrolling = true;
+            setState($this.parent());
+            $scroller.scrollToAnchor($this.attr('href'), 400, function() {
+              scrolling = false;
+            });
+          });
+        }
+        hasRendered = true;
+      }
+      function init() {
+        var interval, timeout;
+        if(!hasInit) {
+          render(); calc(); setState(null, scrolling);
+          // run calc every 100 millisecond
+          interval = setInterval(function() {
+            calc();
+          }, 100);
+          timeout = setTimeout(function() {
+            clearInterval(interval);
+          }, 45000);
+          window.pageLoad.then(function() {
+            setTimeout(function() {
+              clearInterval(interval);
+              clearTimeout(timeout);
+            }, 3000);
+          });
+          $scrollTarget.on('scroll', function() {
+            disabled || setState(null, scrolling);
+          });
+          $window.on('resize', window.throttle(function() {
+            if (!disabled) {
+              render(); calc(); setState(null, scrolling);
+            }
+          }, 100));
+        }
+        hasInit = true;
+      }
+
+      setOptions(options);
+      if (!disabled) {
+        init();
+      }
+      $window.on('resize', window.throttle(function() {
+        init();
+      }, 200));
+      return {
+        setOptions: setOptions
+      };
+    }
+    $.fn.toc = toc;
+  });
+})();
+/*(function () {
+
+})();*/
+</script><script>
+  /* toc must before affix, since affix need to konw toc' height. */(function() {
+  var SOURCES = window.TEXT_VARIABLES.sources;
+  var TOC_SELECTOR = window.TEXT_VARIABLES.site.toc.selectors;
+  window.Lazyload.js(SOURCES.jquery, function() {
+    var $window = $(window);
+    var $articleContent = $('.js-article-content');
+    var $tocRoot = $('.js-toc-root'), $col2 = $('.js-col-aside');
+    var toc;
+    var tocDisabled = false;
+    var hasSidebar = $('.js-page-root').hasClass('layout--page--sidebar');
+    var hasToc = $articleContent.find(TOC_SELECTOR).length > 0;
+
+    function disabled() {
+      return $col2.css('display') === 'none' || !hasToc;
+    }
+
+    tocDisabled = disabled();
+
+    toc = $tocRoot.toc({
+      selectors: TOC_SELECTOR,
+      container: $articleContent,
+      scrollTarget: hasSidebar ? '.js-page-main' : null,
+      scroller: hasSidebar ? '.js-page-main' : null,
+      disabled: tocDisabled
+    });
+
+    $window.on('resize', window.throttle(function() {
+      tocDisabled = disabled();
+      toc && toc.setOptions({
+        disabled: tocDisabled
+      });
+    }, 100));
+
+  });
+})();
+(function() {
+  var SOURCES = window.TEXT_VARIABLES.sources;
+  window.Lazyload.js(SOURCES.jquery, function() {
+    var $window = $(window), $pageFooter = $('.js-page-footer');
+    var $pageAside = $('.js-page-aside');
+    var affix;
+    var tocDisabled = false;
+    var hasSidebar = $('.js-page-root').hasClass('layout--page--sidebar');
+
+    affix = $pageAside.affix({
+      offsetBottom: $pageFooter.outerHeight(),
+      scrollTarget: hasSidebar ? '.js-page-main' : null,
+      scroller: hasSidebar ? '.js-page-main' : null,
+      scroll: hasSidebar ? $('.js-page-main').children() : null,
+      disabled: tocDisabled
+    });
+
+    $window.on('resize', window.throttle(function() {
+      affix && affix.setOptions({
+        disabled: tocDisabled
+      });
+    }, 100));
+
+    window.pageAsideAffix = affix;
+  });
+})();
+</script><script type="text/x-mathjax-config">
+	var _config = { tex2jax: {
+		inlineMath: [['$','$'], ['\\(','\\)']]
+	}};MathJax.Hub.Config(_config);
+</script>
+<script type="text/javascript" src="https://cdn.bootcss.com/mathjax/2.7.4/MathJax.js?config=TeX-MML-AM_CHTML" async></script>
+<script>
+  window.Lazyload.js('https://cdn.bootcss.com/mermaid/8.0.0-rc.8/mermaid.min.js', function() {
+    mermaid.initialize({
+      startOnLoad: true
+    });
+    mermaid.init(undefined, '.language-mermaid');
+  });
+</script>
+
+    </div>
+    <script>(function () {
+  var $root = document.getElementsByClassName('root')[0];
+  if (window.hasEvent('touchstart')) {
+    $root.dataset.isTouch = true;
+    document.addEventListener('touchstart', function(){}, false);
+  }
+})();
+</script>
+  </body>
+</html>
+
