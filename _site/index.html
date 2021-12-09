@@ -317,127 +317,24 @@
               <div class="col-main cell cell--auto"><!-- start custom main top snippet -->
 
 <!-- end custom main top snippet -->
-<article itemscope itemtype="http://schema.org/WebPage"><header style="display:none;"><h1>主页</h1></header><meta itemprop="headline" content="主页"><meta itemprop="author" content="Wenxing Lai"/><div class="js-article-content"><div class="layout--articles"><div class="article-list items items--divided"><article class="item" itemscope itemtype="http://schema.org/BlogPosting"><div class="item__content">
-          <header><a href="/2021/12/06/%E6%B7%B1%E5%85%A5Go-Context.html"><h2 itemprop="headline" class="item__header">深入Go：Context</h2></a></header>
-          <div class="item__description"><div class="article__content" itemprop="description articleBody">在之前的文章中我们了解了Context的使用，我们很自然地会提出一些问题：
-
-
-  Context被传递到多个goroutine中，如何保证没有data race？
-  有CancelFunc的Context，如果不被取消，会有怎样的风险？
-  父Context被取消，如何自动地使得所有子节点被取消？
-  Context的Value如果多次被同一个key写入值，结果会是怎样？
-  听说Context以链表的形式存储Value，会不会有性能问题？
-
-
-带着这些问题，我们一同进入context包，看看Context的设计有着怎样的精妙之处与潜在的坑。
-
-我们这里略过包的注释、Canceled, DeadlineExceeded error以及Context的定义（可以参见上一篇文章），直接...</div><p><a href="/2021/12/06/%E6%B7%B1%E5%85%A5Go-Context.html">阅读更多</a></p></div><div class="article__info clearfix"><ul class="left-col menu"><li>
-              <a class="button button--secondary button--pill button--sm"
-                href="/archive.html?tag=Go">Go</a>
-            </li></ul><ul class="right-col menu"><li><i class="far fa-calendar-alt"></i> <span>2021年 12月06日</span>
-            </li><li><i class="far fa-eye"></i> <span class="js-pageview" data-page-key="">0</span> 阅读</li></ul></div><meta itemprop="author" content="Wenxing Lai"/><meta itemprop="datePublished" content="2021-12-06T00:00:00+00:00">
-    <meta itemprop="keywords" content="Go"></div>
-      </article><article class="item" itemscope itemtype="http://schema.org/BlogPosting"><div class="item__content">
-          <header><a href="/2021/11/30/%E6%B7%B1%E5%85%A5Go-%E4%BD%BF%E7%94%A8context%E5%8C%85%E8%BD%BB%E6%9D%BE%E5%AE%8C%E6%88%90%E5%B9%B6%E5%8F%91%E6%8E%A7%E5%88%B6.html"><h2 itemprop="headline" class="item__header">深入Go：使用context包轻松完成并发控制</h2></a></header>
-          <div class="item__description"><div class="article__content" itemprop="description articleBody">Package context 的引入是 Go 1.7 的重要特性。但好像在实践中，context 并没有太出现在我们的视野中；实际上，kubernetes/client-go 直到2020年才逐渐完善地将 package context  融入其中。
-
-之前在公司技术论坛有过一个问题“Go后台耗时优化方面有什么心得可以分享吗”，其中很多回答都有提到“并发”（实际上我们在项目实践中也是尽可能充分使用Go并发的能力），我们也发现package context也可以极大地方便我们进行并发过程的管理。现在结合GopherCon UK 2017的talk中的技巧与我们实践中的经验，总结出了这篇文章 The Context of the Package context。
-
-太长不看版
-
-
-  c...</div><p><a href="/2021/11/30/%E6%B7%B1%E5%85%A5Go-%E4%BD%BF%E7%94%A8context%E5%8C%85%E8%BD%BB%E6%9D%BE%E5%AE%8C%E6%88%90%E5%B9%B6%E5%8F%91%E6%8E%A7%E5%88%B6.html">阅读更多</a></p></div><div class="article__info clearfix"><ul class="left-col menu"><li>
-              <a class="button button--secondary button--pill button--sm"
-                href="/archive.html?tag=Go">Go</a>
-            </li></ul><ul class="right-col menu"><li><i class="far fa-calendar-alt"></i> <span>2021年 11月30日</span>
-            </li><li><i class="far fa-eye"></i> <span class="js-pageview" data-page-key="">0</span> 阅读</li></ul></div><meta itemprop="author" content="Wenxing Lai"/><meta itemprop="datePublished" content="2021-11-30T00:00:00+00:00">
-    <meta itemprop="keywords" content="Go"></div>
-      </article><article class="item" itemscope itemtype="http://schema.org/BlogPosting"><div class="item__content">
-          <header><a href="/2021/08/16/%E6%B7%B1%E5%85%A5Go-%E9%94%99%E8%AF%AF%E7%9A%84%E5%8C%85%E8%A3%85%E4%B8%8E%E8%A7%A3%E5%8C%85.html"><h2 itemprop="headline" class="item__header">深入Go：错误的包装与解包</h2></a></header>
-          <div class="item__description"><div class="article__content" itemprop="description articleBody">仔细想想，我们的Go代码中可能有四分之一的代码都是和错误处理相关的，而我们已经接受了，error无处不在。但似乎Golang的error处理并不够强大，也缺乏统一的错误处理流程的逻辑；在经历了大量的讨论后，Go 1.13引入了错误的包装和解包，也许某种程度上可以优化我们的错误处理流程。
-
-太长不看版
-
-
-  error的作用有两点：一是让代码进入特定的错误处理流程，二是告诉程序员发生了什么状况
-  error interface只包含了Error() string这一方法，error难以仅仅通过字符串的匹配来完成上述两种角色
-  Go在1.13版本中引入了错误的包装与解包
-    
-      仅需fmt.Errorf("...%w...", ..., err, ...)就可完成err...</div><p><a href="/2021/08/16/%E6%B7%B1%E5%85%A5Go-%E9%94%99%E8%AF%AF%E7%9A%84%E5%8C%85%E8%A3%85%E4%B8%8E%E8%A7%A3%E5%8C%85.html">阅读更多</a></p></div><div class="article__info clearfix"><ul class="left-col menu"><li>
-              <a class="button button--secondary button--pill button--sm"
-                href="/archive.html?tag=Go">Go</a>
-            </li></ul><ul class="right-col menu"><li><i class="far fa-calendar-alt"></i> <span>2021年 08月16日</span>
-            </li><li><i class="far fa-eye"></i> <span class="js-pageview" data-page-key="">0</span> 阅读</li></ul></div><meta itemprop="author" content="Wenxing Lai"/><meta itemprop="datePublished" content="2021-08-16T00:00:00+00:00">
-    <meta itemprop="keywords" content="Go"></div>
-      </article><article class="item" itemscope itemtype="http://schema.org/BlogPosting"><div class="item__content">
-          <header><a href="/2021/05/11/%E6%B7%B1%E5%85%A5Go-Internationalization-%E5%9B%BD%E9%99%85%E5%8C%96.html"><h2 itemprop="headline" class="item__header">深入Go：Internationalization-国际化</h2></a></header>
-          <div class="item__description"><div class="article__content" itemprop="description articleBody">当服务需要应对多语言场景时，我们应该如何组织代码？
-
-说明
-
-本文不探讨诸如单复数变换等复杂情况，如有需要，请参见这里。
-
-（太长不看版）
-
-
-  读取语言标签与相应翻译，进行翻译字符串的注册
-  获取时根据语言解析标签并获得相应语言的Printer，根据Key进行翻译字符串的查找与生成
-
-
-示例代码如下：
-package main
-
-import (
-  "golang.org/x/text/language"
-  "golang.org/x/text/message"
-)
-
-// 此处`und`为undefined，用于语言无对应的翻译时的显示
-// 请根据翻译文件准备好相应的key与翻译字符串
-var msg = map[string]string{"zh": "你好，%s", ...</div><p><a href="/2021/05/11/%E6%B7%B1%E5%85%A5Go-Internationalization-%E5%9B%BD%E9%99%85%E5%8C%96.html">阅读更多</a></p></div><div class="article__info clearfix"><ul class="left-col menu"><li>
-              <a class="button button--secondary button--pill button--sm"
-                href="/archive.html?tag=Go">Go</a>
-            </li></ul><ul class="right-col menu"><li><i class="far fa-calendar-alt"></i> <span>2021年 05月11日</span>
-            </li><li><i class="far fa-eye"></i> <span class="js-pageview" data-page-key="">0</span> 阅读</li></ul></div><meta itemprop="author" content="Wenxing Lai"/><meta itemprop="datePublished" content="2021-05-11T00:00:00+00:00">
-    <meta itemprop="keywords" content="Go"></div>
-      </article><article class="item" itemscope itemtype="http://schema.org/BlogPosting"><div class="item__content">
-          <header><a href="/2021/03/12/%E6%B7%B1%E5%85%A5Go-%E5%B9%B6%E5%8F%91%E8%BF%B7%E6%80%9D-%E6%B6%88%E5%A4%B1%E7%9A%84%E8%B5%8B%E5%80%BC%E8%AF%AD%E5%8F%A5.html"><h2 itemprop="headline" class="item__header">深入Go：并发迷思-消失的赋值语句</h2></a></header>
-          <div class="item__description"><div class="article__content" itemprop="description articleBody">对全局变量的赋值，为何无缘无故消失？等候了千万个时钟周期的打印语句，为何发现变量没有一丝改变？意料之外的结果，却为何又是在情理之中？这究竟是编译器的背叛，还是随机的巧合——本篇文章将带您深入Go内存模型，一起走近并发。
-
-热身
-
-先看一个经典的问题，下列代码输出的结果可能是多少？
-
-wg := sync.WaitGroup{}
-x, y, r1, r2 := 0, 0, 0, 0
-wg.Add(2)
-go func() { // goroutine A
-  y = 1 // line A1
-  r1 = x // line A2
-  wg.Done()
-}()
-go func() { // goroutine B
-  x = 1 // line B1
-  r2 = y // line ...</div><p><a href="/2021/03/12/%E6%B7%B1%E5%85%A5Go-%E5%B9%B6%E5%8F%91%E8%BF%B7%E6%80%9D-%E6%B6%88%E5%A4%B1%E7%9A%84%E8%B5%8B%E5%80%BC%E8%AF%AD%E5%8F%A5.html">阅读更多</a></p></div><div class="article__info clearfix"><ul class="left-col menu"><li>
-              <a class="button button--secondary button--pill button--sm"
-                href="/archive.html?tag=Go">Go</a>
-            </li></ul><ul class="right-col menu"><li><i class="far fa-calendar-alt"></i> <span>2021年 03月12日</span>
-            </li><li><i class="far fa-eye"></i> <span class="js-pageview" data-page-key="">0</span> 阅读</li></ul></div><meta itemprop="author" content="Wenxing Lai"/><meta itemprop="datePublished" content="2021-03-12T00:00:00+00:00">
-    <meta itemprop="keywords" content="Go"></div>
-      </article></div>
-</div><div class="layout--home"><div class="pagination"><p>共计 8 篇文章，2 页。</p>
-    <div class="pagination__menu">
-      <ul class="menu menu--nowrap"><li><div class="button button--secondary button--circle disabled">
-            <i class="fas fa-angle-left"></i>
-          </div></li><li>
-              <div class="button button--primary button--circle focus"><span>1</span></div>
-            </li><li>
-                <a class="button button--secondary button--circle" href="/page2"><span>2</span></a>
-              </li><li><a class="button button--secondary button--circle" href="/page2">
-            <i class="fas fa-angle-right"></i>
-          </a></li></ul>
-    </div>
-  </div></div>
+<article itemscope itemtype="http://schema.org/WebPage"><header style="display:none;"><h1>主页</h1></header><meta itemprop="headline" content="主页"><meta itemprop="author" content="Wenxing Lai"/><div class="js-article-content"><div class="layout--articles"><div class="article-list items"><li class="item" itemscope itemtype="http://schema.org/BlogPosting" data-tags="Go">
+        <div class="item__content"><span class="item__meta">12月06日</span><a itemprop="headline" class="item__header" href="/2021/12/06/%E6%B7%B1%E5%85%A5Go-Context.html">深入Go：Context</a></div>
+      </li><li class="item" itemscope itemtype="http://schema.org/BlogPosting" data-tags="Go">
+        <div class="item__content"><span class="item__meta">11月30日</span><a itemprop="headline" class="item__header" href="/2021/11/30/%E6%B7%B1%E5%85%A5Go-%E4%BD%BF%E7%94%A8context%E5%8C%85%E8%BD%BB%E6%9D%BE%E5%AE%8C%E6%88%90%E5%B9%B6%E5%8F%91%E6%8E%A7%E5%88%B6.html">深入Go：使用context包轻松完成并发控制</a></div>
+      </li><li class="item" itemscope itemtype="http://schema.org/BlogPosting" data-tags="Go">
+        <div class="item__content"><span class="item__meta">08月16日</span><a itemprop="headline" class="item__header" href="/2021/08/16/%E6%B7%B1%E5%85%A5Go-%E9%94%99%E8%AF%AF%E7%9A%84%E5%8C%85%E8%A3%85%E4%B8%8E%E8%A7%A3%E5%8C%85.html">深入Go：错误的包装与解包</a></div>
+      </li><li class="item" itemscope itemtype="http://schema.org/BlogPosting" data-tags="Go">
+        <div class="item__content"><span class="item__meta">05月11日</span><a itemprop="headline" class="item__header" href="/2021/05/11/%E6%B7%B1%E5%85%A5Go-Internationalization-%E5%9B%BD%E9%99%85%E5%8C%96.html">深入Go：Internationalization-国际化</a></div>
+      </li><li class="item" itemscope itemtype="http://schema.org/BlogPosting" data-tags="Go">
+        <div class="item__content"><span class="item__meta">03月12日</span><a itemprop="headline" class="item__header" href="/2021/03/12/%E6%B7%B1%E5%85%A5Go-%E5%B9%B6%E5%8F%91%E8%BF%B7%E6%80%9D-%E6%B6%88%E5%A4%B1%E7%9A%84%E8%B5%8B%E5%80%BC%E8%AF%AD%E5%8F%A5.html">深入Go：并发迷思-消失的赋值语句</a></div>
+      </li><li class="item" itemscope itemtype="http://schema.org/BlogPosting" data-tags="Go">
+        <div class="item__content"><span class="item__meta">02月19日</span><a itemprop="headline" class="item__header" href="/2021/02/19/%E6%B7%B1%E5%85%A5Go-%E5%9E%83%E5%9C%BE%E5%9B%9E%E6%94%B6%E7%9A%84%E6%BC%94%E8%BF%9B.html">深入Go：垃圾回收的演进</a></div>
+      </li><li class="item" itemscope itemtype="http://schema.org/BlogPosting" data-tags="Go">
+        <div class="item__content"><span class="item__meta">11月27日</span><a itemprop="headline" class="item__header" href="/2020/11/27/%E6%B7%B1%E5%85%A5Go-sync.Map.html">深入Go：sync.Map</a></div>
+      </li><li class="item" itemscope itemtype="http://schema.org/BlogPosting" data-tags="Probability,Fun">
+        <div class="item__content"><span class="item__meta">06月28日</span><a itemprop="headline" class="item__header" href="/2020/06/28/%E6%89%94%E7%90%83%E8%BF%9B%E6%A1%B6%E4%B8%8E%E8%B4%9F%E8%BD%BD%E5%9D%87%E8%A1%A1.html">扔球进桶与负载均衡</a></div>
+      </li></div>
+</div><div class="layout--home"></div>
 <script>/*(function () {
 
 })();*/
