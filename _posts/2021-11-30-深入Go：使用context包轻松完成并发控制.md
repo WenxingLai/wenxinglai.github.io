@@ -2,6 +2,8 @@
 title: 深入Go：使用context包轻松完成并发控制
 tags: Go
 ---
+一次请求到达后台，需要并发启动大量的任务以组合出最终的响应，如何设计实现：一个请求到来之后，X秒超时；超时或遇到错误时立即返回，并取消所有并发任务？其实用了Go context包，这个问题就可以非常优雅自然地解决，并且了解Context之后你会赞叹：“哇，真就该这么设计！”
+<!--more-->
 
 Package `context` 的引入是 Go 1.7 的重要特性。但好像在实践中，`context` 并没有太出现在我们的视野中；实际上，`kubernetes/client-go` [直到2020年](https://github.com/kubernetes/client-go/commit/1faf9e8d03b91c5c5529e1ac8ed6838fb6248049#diff-44c36ff04d213cbb389bfe45b53a1aae22bb37d2fb6ba7d1483ad9373724d725)才逐渐完善地将 package `context ` 融入其中。
 

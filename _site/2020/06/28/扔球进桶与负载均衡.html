@@ -3,7 +3,7 @@
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"><title>扔球进桶与负载均衡 - Wenxing Lai</title>
 
-<meta name="description" content="同事介绍负载均衡算法时透露，其原B站leader透露说B站的负载均衡算法是基于一篇对扔球进桶问题讨论的论文。正好笔者曾看过相关内容，也深感这一简单的概率游戏有着让人意外的结果，故希望写一系列的文章，介绍这一简单而优美的结果。本篇文章为该系列文章的集合。在服务器的负载均衡模型中，我们可以把负载均衡看作是“扔球进桶”...">
+<meta name="description" content="同事介绍负载均衡算法时透露，其原B站leader透露说B站的负载均衡算法是基于一篇对扔球进桶问题讨论的论文。正好笔者曾看过相关内容，也深感这一简单的概率游戏有着让人意外的结果，故希望写一系列的文章，介绍这一简单而优美的结果。">
 <link rel="canonical" href="http://localhost:4000/2020/06/28/%E6%89%94%E7%90%83%E8%BF%9B%E6%A1%B6%E4%B8%8E%E8%B4%9F%E8%BD%BD%E5%9D%87%E8%A1%A1.html"><link rel="alternate" type="application/rss+xml" title="Wenxing Lai" href="/feed.xml"><!-- start favicons snippet, use https://realfavicongenerator.net/ --><link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png"><link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png"><link rel="manifest" href="/assets/site.webmanifest"><link rel="mask-icon" href="/assets/safari-pinned-tab.svg" color="#fc4d50"><link rel="shortcut icon" href="/assets/favicon.ico">
 
 <meta name="msapplication-TileColor" content="#ffc40d"><meta name="msapplication-config" content="/assets/browserconfig.xml">
@@ -332,9 +332,9 @@
     <meta itemprop="keywords" content="Probability,Fun"><div class="js-article-content"><div class="layout--article"><!-- start custom article top snippet -->
 
 <!-- end custom article top snippet -->
-<div class="article__content" itemprop="articleBody"><p>同事介绍负载均衡算法时透露，其原B站leader透露说B站的负载均衡算法是基于一篇对扔球进桶问题讨论的论文。正好笔者曾看过相关内容，也深感这一简单的概率游戏有着让人意外的结果，故希望写一系列的文章，介绍这一简单而优美的结果。本篇文章为该系列文章的集合。</p>
-
-<p>在服务器的负载均衡模型中，我们可以把负载均衡看作是“扔球进桶”的游戏——我们的目标即<strong>最小化含有球数量最高的桶里的球的数量</strong>。在讨论中，有三种模型：</p>
+<div class="article__content" itemprop="articleBody"><p>同事介绍负载均衡算法时透露，其原B站leader透露说B站的负载均衡算法是基于一篇对扔球进桶问题讨论的论文。正好笔者曾看过相关内容，也深感这一简单的概率游戏有着让人意外的结果，故希望写一系列的文章，介绍这一简单而优美的结果。
+<!--more-->
+在服务器的负载均衡模型中，我们可以把负载均衡看作是“扔球进桶”的游戏——我们的目标即<strong>最小化含有球数量最高的桶里的球的数量</strong>。在讨论中，有三种模型：</p>
 
 <ul>
   <li>静态模型：把球<strong>一个一个地</strong>扔进桶里（扔第$i$个球时，前$i-1$个球被扔进了哪里是已经确定的）；</li>

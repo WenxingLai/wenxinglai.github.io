@@ -3,7 +3,7 @@
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"><title>深入Go：使用context包轻松完成并发控制 - Wenxing Lai</title>
 
-<meta name="description" content="Package context 的引入是 Go 1.7 的重要特性。但好像在实践中，context 并没有太出现在我们的视野中；实际上，kubernetes/client-go 直到2020年才逐渐完善地将 package context  融入其中。之前在公司技术论坛有过一个问题“Go后台耗时优化方面有什么心得...">
+<meta name="description" content="一次请求到达后台，需要并发启动大量的任务以组合出最终的响应，如何设计实现：一个请求到来之后，X秒超时；超时或遇到错误时立即返回，并取消所有并发任务？其实用了Go context包，这个问题就可以非常优雅自然地解决，并且了解Context之后你会赞叹：“哇，真就该这么设计！”">
 <link rel="canonical" href="http://localhost:4000/2021/11/30/%E6%B7%B1%E5%85%A5Go-%E4%BD%BF%E7%94%A8context%E5%8C%85%E8%BD%BB%E6%9D%BE%E5%AE%8C%E6%88%90%E5%B9%B6%E5%8F%91%E6%8E%A7%E5%88%B6.html"><link rel="alternate" type="application/rss+xml" title="Wenxing Lai" href="/feed.xml"><!-- start favicons snippet, use https://realfavicongenerator.net/ --><link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png"><link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png"><link rel="manifest" href="/assets/site.webmanifest"><link rel="mask-icon" href="/assets/safari-pinned-tab.svg" color="#fc4d50"><link rel="shortcut icon" href="/assets/favicon.ico">
 
 <meta name="msapplication-TileColor" content="#ffc40d"><meta name="msapplication-config" content="/assets/browserconfig.xml">
@@ -329,7 +329,10 @@
     <meta itemprop="keywords" content="Go"><div class="js-article-content"><div class="layout--article"><!-- start custom article top snippet -->
 
 <!-- end custom article top snippet -->
-<div class="article__content" itemprop="articleBody"><p>Package <code class="language-plaintext highlighter-rouge">context</code> 的引入是 Go 1.7 的重要特性。但好像在实践中，<code class="language-plaintext highlighter-rouge">context</code> 并没有太出现在我们的视野中；实际上，<code class="language-plaintext highlighter-rouge">kubernetes/client-go</code> <a href="https://github.com/kubernetes/client-go/commit/1faf9e8d03b91c5c5529e1ac8ed6838fb6248049#diff-44c36ff04d213cbb389bfe45b53a1aae22bb37d2fb6ba7d1483ad9373724d725">直到2020年</a>才逐渐完善地将 package <code class="language-plaintext highlighter-rouge">context </code> 融入其中。</p>
+<div class="article__content" itemprop="articleBody"><p>一次请求到达后台，需要并发启动大量的任务以组合出最终的响应，如何设计实现：一个请求到来之后，X秒超时；超时或遇到错误时立即返回，并取消所有并发任务？其实用了Go context包，这个问题就可以非常优雅自然地解决，并且了解Context之后你会赞叹：“哇，真就该这么设计！”
+<!--more--></p>
+
+<p>Package <code class="language-plaintext highlighter-rouge">context</code> 的引入是 Go 1.7 的重要特性。但好像在实践中，<code class="language-plaintext highlighter-rouge">context</code> 并没有太出现在我们的视野中；实际上，<code class="language-plaintext highlighter-rouge">kubernetes/client-go</code> <a href="https://github.com/kubernetes/client-go/commit/1faf9e8d03b91c5c5529e1ac8ed6838fb6248049#diff-44c36ff04d213cbb389bfe45b53a1aae22bb37d2fb6ba7d1483ad9373724d725">直到2020年</a>才逐渐完善地将 package <code class="language-plaintext highlighter-rouge">context </code> 融入其中。</p>
 
 <p>之前在公司技术论坛有过一个问题“Go后台耗时优化方面有什么心得可以分享吗”，其中很多回答都有提到“并发”（实际上我们在项目实践中也是尽可能充分使用Go并发的能力），我们也发现package <code class="language-plaintext highlighter-rouge">context</code>也可以极大地方便我们进行并发过程的管理。现在结合GopherCon UK 2017的<a href="https://www.gophercon.co.uk/videos/2017/how-to-correctly-use-package-context/">talk</a>中的技巧与我们实践中的经验，总结出了这篇文章 <em>The Context of the Package <code class="language-plaintext highlighter-rouge">context</code></em>。</p>
 

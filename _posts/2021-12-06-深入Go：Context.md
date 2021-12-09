@@ -2,6 +2,8 @@
 title: 深入Go：Context
 tags: Go
 ---
+在理解了 package context 的使用后，我们很自然地想问其背后的设计哲学有什么？实际上，我们发现无论是在关于 Context 的批评/讨论也不少，那么 Context 的设计合不合理？带着这些疑虑，我们深入 context 的源码，尝试对这些问题作出解答。
+<!--more-->
 
 在之前的文章中我们了解了`Context`的使用，我们很自然地会提出一些问题：
 

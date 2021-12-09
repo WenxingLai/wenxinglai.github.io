@@ -3,7 +3,7 @@
 <meta http-equiv="X-UA-Compatible" content="IE=edge">
 <meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no"><title>深入Go：Context - Wenxing Lai</title>
 
-<meta name="description" content="在之前的文章中我们了解了Context的使用，我们很自然地会提出一些问题：  Context被传递到多个goroutine中，如何保证没有data race？  有CancelFunc的Context，如果不被取消，会有怎样的风险？  父Context被取消，如何自动地使得所有子节点被取消？  Context的V...">
+<meta name="description" content="在理解了 package context 的使用后，我们很自然地想问其背后的设计哲学有什么？实际上，我们发现无论是在关于 Context 的批评/讨论也不少，那么 Context 的设计合不合理？带着这些疑虑，我们深入 context 的源码，尝试对这些问题作出解答。">
 <link rel="canonical" href="http://localhost:4000/2021/12/06/%E6%B7%B1%E5%85%A5Go-Context.html"><link rel="alternate" type="application/rss+xml" title="Wenxing Lai" href="/feed.xml"><!-- start favicons snippet, use https://realfavicongenerator.net/ --><link rel="apple-touch-icon" sizes="180x180" href="/assets/apple-touch-icon.png"><link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png"><link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png"><link rel="manifest" href="/assets/site.webmanifest"><link rel="mask-icon" href="/assets/safari-pinned-tab.svg" color="#fc4d50"><link rel="shortcut icon" href="/assets/favicon.ico">
 
 <meta name="msapplication-TileColor" content="#ffc40d"><meta name="msapplication-config" content="/assets/browserconfig.xml">
@@ -329,7 +329,10 @@
     <meta itemprop="keywords" content="Go"><div class="js-article-content"><div class="layout--article"><!-- start custom article top snippet -->
 
 <!-- end custom article top snippet -->
-<div class="article__content" itemprop="articleBody"><p>在之前的文章中我们了解了<code class="language-plaintext highlighter-rouge">Context</code>的使用，我们很自然地会提出一些问题：</p>
+<div class="article__content" itemprop="articleBody"><p>在理解了 package context 的使用后，我们很自然地想问其背后的设计哲学有什么？实际上，我们发现无论是在关于 Context 的批评/讨论也不少，那么 Context 的设计合不合理？带着这些疑虑，我们深入 context 的源码，尝试对这些问题作出解答。
+<!--more--></p>
+
+<p>在之前的文章中我们了解了<code class="language-plaintext highlighter-rouge">Context</code>的使用，我们很自然地会提出一些问题：</p>
 
 <ul>
   <li><code class="language-plaintext highlighter-rouge">Context</code>被传递到多个goroutine中，如何保证没有data race？</li>
