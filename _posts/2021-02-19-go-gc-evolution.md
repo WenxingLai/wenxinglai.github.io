@@ -3,7 +3,7 @@ title: 深入Go：垃圾回收的演进
 tags: Go
 ---
 
-Stop the world 是讨论垃圾回收（Garbage Collection，GC）时绕不开的话题，曾经Go语言的GC机制也威胁着服务的响应时间——Discord技术团队的文章《Why Discord is switching from Go to Rust》讨论了Go语言GC带来的问题。Go通过版本迭代已经极大地改善了GC的问题，平均每次STW时间从100+ms降低到了0.5ms——是什么神奇的魔法使得世界几乎无需暂停？在本文中，我们通过提问、解答的方式尝试对该演进的主要过程进行梳理。
+Stop the world 是讨论垃圾回收（Garbage Collection，GC）时绕不开的话题，曾经Go语言的GC机制也威胁着服务的响应时间——Discord技术团队的文章*Why Discord is switching from Go to Rust*讨论了Go语言GC带来的问题。Go通过版本迭代已经极大地改善了GC的问题，平均每次STW时间从100+ms降低到了0.5ms——是什么神奇的魔法使得世界几乎无需暂停？在本文中，我们通过提问、解答的方式尝试对该演进的主要过程进行梳理。
 <!--more-->
 
 #### 垃圾回收有哪些机制，各有什么利弊？
