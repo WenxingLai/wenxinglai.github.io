@@ -676,3 +676,7 @@ return
 | `t`  | `+1s, true`  | new a channel | `nil`      | `c.Value`  | `c.Value`  |
 | `v2` | `t.Deadline` | `t.Done`      | `nil`      | `t.Value`  | `"baz"`    |
 | `c2` | `t.Deadline` | `closedchan`  | `Canceled` | `t.Value`  | `t.Value`  |
+
+-----
+
+我的博客即将同步至腾讯云+社区，邀请大家一同入驻：[腾讯云+社区链接](https://cloud.tencent.com/developer/support-plan?invite_code=1jpnp7ydes4cr)
