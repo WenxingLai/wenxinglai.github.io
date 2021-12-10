@@ -79,3 +79,4 @@ build-iPhoneSimulator/
 .rvmrc
 
 .jekyll-cache/
+_site/
