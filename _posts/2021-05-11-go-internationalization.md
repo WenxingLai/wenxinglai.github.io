@@ -1,6 +1,7 @@
 ---
 title: 深入Go：Internationalization-国际化
 tags: Go
+key: go-internationalization
 ---
 
 当服务需要应对多语言场景时，我们应该如何组织代码？

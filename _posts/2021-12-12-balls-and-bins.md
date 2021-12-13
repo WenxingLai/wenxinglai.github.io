@@ -1,6 +1,7 @@
 ---
 title: 扔球进桶与负载均衡
 tags: Probability Fun
+key: balls-and-bins
 ---
 
 同事介绍负载均衡算法时透露，其原B站leader透露说B站的负载均衡算法是基于一篇对扔球进桶问题讨论的论文。正好笔者曾看过相关内容，也深感这一简单的概率游戏有着让人意外的结果，故希望写一系列的文章，介绍这一简单而优美的结果。（本文首发于[腾讯云+社区](https://cloud.tencent.com/developer/article/1916945)。）

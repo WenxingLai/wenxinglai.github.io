@@ -1,6 +1,7 @@
 ---
 title: 深入Go：sync.Map
 tags: Go
+key: go-sync-map
 ---
 
 我们在使用Go的项目中需要有并发读写的map时，我们了解到Go提供`sync.Map`这一数据结构；通过对其简单了解，发现它正好适合我们需要的场景。随着了解的深入，我们又有了疑惑：为什么不像Java SE 8之前的ConcurrentHashMap一样，使用分段锁？为什么在内部需要一个哨兵指针`expunged`？这两个问题我们简单Google后都没有找到解析和讨论，因此我们决定深入`sync.Map`的源代码，尝试回答这两个问题。
