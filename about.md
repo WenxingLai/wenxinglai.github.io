@@ -29,7 +29,8 @@ key: page-about
 ```
 Name: Wenxing Lai
 Email: [first_name].[last_name] [at] outlook [dot] com
-About: Senior software engineer at Cloud Product Department 3, CSIG, Tencent. I am currently working on TI Platform, an all-in-one AI platform.
+About: Senior software engineer at Cloud Product Department 3, CSIG, Tencent. 
+       I am currently working on TI Platform, an all-in-one AI platform.
 Languages: 'Go', 'Python', 'C++', 'Java'
 Experiences: 
     YouTu Lab, CSIG, Tencent, Feb 2020 - Oct 2022, Software Engineer
