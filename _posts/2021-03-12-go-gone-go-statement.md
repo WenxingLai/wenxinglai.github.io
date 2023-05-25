@@ -1,6 +1,6 @@
 ---
 title: 深入Go：并发迷思-消失的赋值语句
-tags: Go, MemoryModel
+tags: Go MemoryModel
 key: go-gone-go-statement
 ---
 
