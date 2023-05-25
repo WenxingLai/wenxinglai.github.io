@@ -29,10 +29,11 @@ key: page-about
 ```
 Name: Wenxing Lai
 Email: [first_name].[last_name] [at] outlook [dot] com
-About: I am currently a software engineer at YouTu Lab, Tencent. I am working on TI-ONE, an all-in-one AI platform.
+About: Senior software engineer at Cloud Product Department 3, CSIG, Tencent. I am currently working on TI Platform, an all-in-one AI platform.
 Languages: 'Go', 'Python', 'C++', 'Java'
 Experiences: 
-    Tencent, Jun 2019 – Feb 2020, Software Engineering Intern
+    YouTu Lab, CSIG, Tencent, Feb 2020 - Oct 2022, Software Engineer
+    YouTu Lab, CSIG, Tencent, Jun 2019 – Feb 2020, Software Engineering Intern
     iQIYI.com, Mar 2019 – Jun 2019, Software Engineering Intern
     Centre for Quantum Technologies, NUS, Jul 2018 – Aug 2018, Researcher
     Yaozhi Asset Management Co., LLP, Apr 2017 – Jul 2017, Assistant Financial Engineer
